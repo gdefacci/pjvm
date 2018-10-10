@@ -47,6 +47,10 @@ instance enumAccessFlag :: Enum AccessFlag where
 instance arbAccessFlag :: Arbitrary AccessFlag where
   arbitrary = arbitraryBitMask
 
+data FieldAccessFlag = FieldAccessFlag -- FIXME
+
+data MethodAccessFlag = MethodAccessFlag -- FIXME
+
 {--
 data MethodAccessFlag =
   M_PUBLIC                       -- 0x0001 Declared public; may be accessed from outside its package.

@@ -148,6 +148,11 @@ data Field flgs b fld attrs = Field {
   fieldAttributes :: attrs
   }
 
+derive instance repGenericField :: Generic (Field flgs b fld attrs) _
+derive instance eqField :: (Eq flgs, Eq b, Eq fld, Eq attrs) => Eq (Field flgs b fld attrs)
+instance showField :: (Show flgs, Show b, Show fld, Show attrs) => Show (Field flgs b fld attrs) where
+  show = genericShow
+
 type FieldDirect = Field (S.Set FieldAccessFlag) String FieldType AttributesDirect
 
 type FieldFile = Field Word16 Word16 Word16 AttributesFile
@@ -159,6 +164,11 @@ data Method flgs b mthd attrs = Method {
   methodAttributesCount :: Word16,
   methodAttributes :: attrs
 }
+
+derive instance repGenericMethod :: Generic (Method flgs b fld attrs) _
+derive instance eqMethod :: (Eq flgs, Eq b, Eq fld, Eq attrs) => Eq (Method flgs b fld attrs)
+instance showMethod :: (Show flgs, Show b, Show fld, Show attrs) => Show (Method flgs b fld attrs) where
+  show = genericShow
 
 type MethodDirect = Method (S.Set MethodAccessFlag) String MethodSignature AttributesDirect
 
@@ -183,6 +193,11 @@ data Class pool accessFlag b fld mthd attr = Class {
   classAttributesCount :: Word16, -- ^ Number of class attributes
   classAttributes :: Array attr   -- ^ Class attributes
   }
+
+derive instance repGenericClass :: Generic (Class pool accessFlag b fld mthd attr) _
+derive instance eqClass :: (Eq pool, Eq accessFlag, Eq b, Eq fld, Eq mthd, Eq attr) => Eq (Class pool accessFlag b fld mthd attr)
+instance showClass :: (Show pool, Show accessFlag, Show b, Show fld, Show mthd, Show attr) => Show (Class pool accessFlag b fld mthd attr) where
+  show = genericShow
 
 type ClassDirect = Class PoolDirect (S.Set AccessFlag) String FieldDirect MethodDirect AttributesDirect
 

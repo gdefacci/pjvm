@@ -1,0 +1,9 @@
+{
+  "name": "purescript-jvm",
+  "version": "0.1.0",
+  "main": "index.js",
+  "license": "MIT",
+  "devDependencies": {
+    "text-encoding": "^0.6.4"
+  }
+}

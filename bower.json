@@ -1,0 +1,22 @@
+{
+  "name": "purescript-jvm",
+  "ignore": [
+    "**/.*",
+    "node_modules",
+    "bower_components",
+    "output"
+  ],
+  "dependencies": {
+    "purescript-prelude": "^4.1.0",
+    "purescript-console": "^4.1.0",
+    "purescript-effect": "^2.0.0",
+    "purescript-arraybuffer": "^8.0.0",
+    "purescript-text-encoding": "^0.0.8",
+    "purescript-ordered-collections": "^1.4.0",
+    "purescript-generics-rep": "^6.1.0"
+  },
+  "devDependencies": {
+    "purescript-quickcheck": "^5.0.0",
+    "purescript-psci-support": "^4.0.0"
+  }
+}

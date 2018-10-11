@@ -17,5 +17,7 @@ setAndGet flsArr =
   in msk == fls
 
 spec :: Effect Unit
-spec =
+spec = do
   quickCheck (setAndGet :: Array AccessFlag -> Boolean)
+  quickCheck (setAndGet :: Array MethodAccessFlag -> Boolean)
+  quickCheck (setAndGet :: Array FieldAccessFlag -> Boolean)

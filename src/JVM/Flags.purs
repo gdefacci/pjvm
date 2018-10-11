@@ -18,7 +18,7 @@ data AccessFlag =
   | ACC_ANNOTATION   -- 0x2000 Declared as an annotation type.
   | ACC_ENUM         -- 0x4000 Declared as an enum ty
 
-derive instance ordEq :: Eq AccessFlag
+derive instance eqAccessFlag :: Eq AccessFlag
 
 instance ordAccessFlag :: Ord AccessFlag where
   compare = compareBitMask
@@ -47,11 +47,6 @@ instance enumAccessFlag :: Enum AccessFlag where
 instance arbAccessFlag :: Arbitrary AccessFlag where
   arbitrary = arbitraryBitMask
 
-data FieldAccessFlag = FieldAccessFlag -- FIXME
-
-data MethodAccessFlag = MethodAccessFlag -- FIXME
-
-{--
 data MethodAccessFlag =
   M_PUBLIC                       -- 0x0001 Declared public; may be accessed from outside its package.
   | M_PRIVATE                    -- 0x0002 Declared private; accessible only within the defining class.
@@ -65,9 +60,15 @@ data MethodAccessFlag =
   | M_ABSTRACT                   -- 0x0400 Declared abstract; no implementation is provided.
   | M_STRICT                     -- 0x0800 Declared strictfp; floating-point mode is FP-strict.
   | M_SYNTHETIC                  -- 0x1000
-  deriving (Eq, Show, Ord, Enum)
 
-instance BitMask MethodAccessFlag where
+derive instance eqMethodAccessFlag :: Eq MethodAccessFlag
+
+instance ordMethodAccessFlag :: Ord MethodAccessFlag where
+  compare = compareBitMask
+
+instance bitMaskMethodAccessFlag :: BitMask MethodAccessFlag where
+  all = NonEmpty M_PUBLIC [ M_PRIVATE, M_PROTECTED, M_STATIC, M_FINAL, M_SYNCHRONIZED, M_BRIDGE, 
+                            M_VARARGS, M_NATIVE, M_ABSTRACT, M_STRICT, M_SYNTHETIC ]
   maskBit x = case x of
     M_PUBLIC           ->  0        -- 0x0001
     M_PRIVATE          ->  1        -- 0x0002
@@ -82,6 +83,17 @@ instance BitMask MethodAccessFlag where
     M_STRICT           ->  11       -- 0x0800
     M_SYNTHETIC        ->  12       -- 0x1000
 
+instance boundedMethodAccessFlag :: Bounded MethodAccessFlag where
+  top = maxBitMask
+  bottom = minBitMask
+
+instance enumMethodAccessFlag :: Enum MethodAccessFlag where
+  succ = succBitMask
+  pred = predBitMask
+
+instance arbMethodAccessFlag :: Arbitrary MethodAccessFlag where
+  arbitrary = arbitraryBitMask
+
 data FieldAccessFlag =
   F_PUBLIC                    -- 0x0001 Declared public; may be accessed from outside its package.
   | F_PRIVATE                 -- 0x0002 Declared private; usable only within the defining class.
@@ -92,9 +104,11 @@ data FieldAccessFlag =
   | F_TRANSIENT               -- 0x0080 Declared transient; not written or read by a persistent object manager.
   | F_SYNTHETIC               -- 0x1000 Declared synthetic; not present in the source code.
   | F_ENUM                    -- 0x4000 Declared as an element of an enum.
-  deriving (Eq, Show, Ord, Enum)
 
-instance BitMask FieldAccessFlag where
+derive instance eqFieldAccessFlag :: Eq FieldAccessFlag
+
+instance fieldAccessFlagBitMask :: BitMask FieldAccessFlag where
+  all =  NonEmpty F_PUBLIC [F_PRIVATE, F_PROTECTED, F_STATIC, F_FINAL, F_VOLATILE, F_TRANSIENT, F_SYNTHETIC, F_ENUM]
   maskBit x = case x of
     F_PUBLIC       -> 0             -- 0x0001
     F_PRIVATE      -> 1             -- 0x0002
@@ -104,4 +118,18 @@ instance BitMask FieldAccessFlag where
     F_VOLATILE     -> 6             -- 0x0040
     F_TRANSIENT    -> 7             -- 0x0080
     F_SYNTHETIC    -> 12            -- 0x1000
-    F_ENUM         -> 14            -- 0x4000 -}
+    F_ENUM         -> 14            -- 0x4000 -
+
+instance ordFieldAccessFlag :: Ord FieldAccessFlag where
+  compare = compareBitMask
+
+instance boundedFieldAccessFlag :: Bounded FieldAccessFlag where
+  top = maxBitMask
+  bottom = minBitMask
+
+instance enumFieldAccessFlag :: Enum FieldAccessFlag where
+  succ = succBitMask
+  pred = predBitMask
+
+instance arbFieldAccessFlag :: Arbitrary FieldAccessFlag where
+  arbitrary = arbitraryBitMask

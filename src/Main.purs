@@ -22,13 +22,15 @@ type MyRec = {
   c :: Word64
 }
 
-myTypeDecoder = MyType <$> w32 <*> wString <*> w64 <*> w16
+myTypeDecoder ::   Decoder MyType
+myTypeDecoder = MyType <$> getW32 <*> getString <*> getW64 <*> getW16
 
+myTypeDecoder1 ::   Decoder MyType
 myTypeDecoder1 = do
-  a <- w32
-  b <- wString
-  c <- w64
-  d <- w16
+  a <- getW32
+  b <- getString
+  c <- getW64
+  d <- getW16
   pure $ MyType a b c d
 
 derive instance eqMyType :: Eq MyType
@@ -37,7 +39,7 @@ instance myTypeShow :: Show MyType where
   show (MyType a b c d) = "(MyType " <> (show a) <> " " <> (show b) <> " " <> (show c) <> " " <> (show d) <> ")"
 
 combr :: Decoder MyRec
-combr = {a : _, b: _,  c:_ } <$> w32 <*> wString <*> w64
+combr = {a : _, b: _,  c:_ } <$> getW32 <*> getString <*> getW64
 
 main :: Effect Unit
 main = do

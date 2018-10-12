@@ -2,7 +2,41 @@ module JVM.Instruction where
 
 import Prelude
 
+import Data.Binary.Types 
 import Data.Generic.Rep (class Generic)
+import Data.Generic.Rep.Show (genericShow)
+import Data.Tuple (Tuple(..))
+
+data IMM =
+    I0     -- ^ 0
+  | I1     -- ^ 1
+  | I2     -- ^ 2
+  | I3     -- ^ 3
+
+derive instance eqIMM :: Eq IMM
+derive instance ordIMM :: Ord IMM
+
+derive instance genericIMM :: Generic IMM _
+
+instance showIMM :: Show IMM where
+  show = genericShow
+
+  -- | Comparation operation type. Not all CMP instructions support all operations.
+data CMP =
+    C_EQ
+  | C_NE
+  | C_LT
+  | C_GE
+  | C_GT
+  | C_LE
+
+derive instance eqCMP :: Eq CMP
+derive instance ordCMP :: Ord CMP
+
+derive instance genericCMP :: Generic CMP _
+
+instance showCMP :: Show CMP where
+  show = genericShow
 
 -- | JVM instruction set. For comments, see JVM specification.
 data Instruction =
@@ -133,8 +167,8 @@ data Instruction =
   | GOTO Word16            -- ^ 167
   | JSR Word16             -- ^ 168
   | RET                    -- ^ 169
-  | TABLESWITCH Word8 Word32 Word32 Word32 [Word32]     -- ^ 170
-  | LOOKUPSWITCH Word8 Word32 Word32 [(Word32, Word32)] -- ^ 171
+  | TABLESWITCH Word8 Word32 Word32 Word32 (Array Word32)     -- ^ 170
+  | LOOKUPSWITCH Word8 Word32 Word32 (Array (Tuple Word32 Word32)) -- ^ 171
   | IRETURN                -- ^ 172
   | LRETURN                -- ^ 173
   | FRETURN                -- ^ 174
@@ -164,11 +198,10 @@ data Instruction =
   | IFNONNULL Word16       -- ^ 199
   | GOTO_W Word32          -- ^ 200
   | JSR_W Word32           -- ^ 201
-  deriving (Eq, Show)
 
 derive instance eqInstruction :: Eq Instruction
 
 derive instance genericInstruction :: Generic Instruction _
 
-instance showInstruction :: Show Instruction where
-  show = genericShow
+instance showIstr :: Show Instruction where
+  show instr = genericShow instr

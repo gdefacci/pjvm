@@ -30,7 +30,7 @@ data FieldType =
 
 derive instance eqFieldType :: Eq FieldType
 
-instance fieldTypeShow :: Show FieldType where
+instance showFieldType :: Show FieldType where
   show SignedByte = "byte"
   show CharByte = "char"
   show DoubleType = "double"

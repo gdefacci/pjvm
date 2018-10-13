@@ -13,7 +13,10 @@
     "purescript-arraybuffer": "^8.0.0",
     "purescript-text-encoding": "^0.0.8",
     "purescript-ordered-collections": "^1.4.0",
-    "purescript-generics-rep": "^6.1.0"
+    "purescript-generics-rep": "^6.1.0",
+    "bower": "*",
+    "install": "^1.0.4",
+    "purescript-contravariant": "^4.0.0"
   },
   "devDependencies": {
     "purescript-quickcheck": "^5.0.0",

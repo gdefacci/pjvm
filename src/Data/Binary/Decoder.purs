@@ -75,6 +75,12 @@ getW64 = sized 8 $ \dv -> \bo -> do
     w2 <- ow2
     pure $ Word64 w1 w2
 
+getFloat32 :: Decoder Float32
+getFloat32 = sized 4 $ \dv -> \bo -> (Float32 <$> _) <$> DV.getFloat32be dv bo
+
+getFloat64 :: Decoder Float64
+getFloat64 = sized 4 $ \dv -> \bo -> (Float64 <$> _) <$> DV.getFloat64be dv bo
+
 fail :: forall a. String -> Decoder a
 fail msg = Decoder $ \dv -> \ofst -> throw $ "Error at " <> (show ofst) <> ". " <> msg
 

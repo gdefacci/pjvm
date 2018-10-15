@@ -2,6 +2,8 @@ module Data.Binary.Types where
 
 import Prelude (class Show, class Eq, (<>), show)
 
+import Data.Newtype (class Newtype)
+
 import Data.UInt
 
 newtype Word8 = Word8 UInt
@@ -17,8 +19,15 @@ derive instance eqWord16 :: Eq Word16
 derive instance eqWord32 :: Eq Word32
 derive instance eqWord64 :: Eq Word64
 
+derive instance newtypeWord8 ::  Newtype Word8 _
+derive instance newtypeWord16 :: Newtype Word16 _
+derive instance newtypeWord32 :: Newtype Word32 _
+
 derive instance eqFloat32 :: Eq Float32
 derive instance eqFloat64 :: Eq Float64
+
+derive instance newtypeFloat32 :: Newtype Float32 _
+derive instance newtypeFloat64 :: Newtype Float64 _
 
 instance w8Show :: Show Word8 where
   show (Word8 i) = "Word8 " <> (show i)

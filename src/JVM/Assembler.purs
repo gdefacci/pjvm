@@ -2,10 +2,10 @@ module JVM.Assembler where
 
 import Prelude
 
-import Data.Binary.Types 
+import Data.Binary.Types
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
-import JVM.ClassFile (AttributesFile)
+import JVM.Members (AttributesFile)
 
 import JVM.Instruction (Instruction(..))
 

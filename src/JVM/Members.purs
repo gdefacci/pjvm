@@ -1,6 +1,5 @@
 module JVM.Members where
 
-import Data.Maybe
 import Prelude
 
 import Data.Array as A
@@ -11,10 +10,12 @@ import Data.Foldable (intercalate)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Map as M
+import Data.Maybe (Maybe(..))
 import Data.Set as S
 import Data.String.CodeUnits (fromCharArray)
 import Data.Tuple (Tuple(..))
 import Effect.Exception.Unsafe (unsafeThrow)
+import JVM.Attributes (AttributesDirect(..), AttributesFile(..))
 import JVM.Flags (FieldAccessFlag, MethodAccessFlag)
 
 -- | Field signature format
@@ -79,33 +80,6 @@ data MethodNameType = MethodNameType {
   ntSignature :: MethodSignature
 }
 
--- | Any (class/ field/ method/ ...) attribute format.
--- Some formats specify special formats for @attributeValue@.
-data Attribute = Attribute {
-  attributeName :: Word16,
-  attributeLength :: Word32,
-  attributeValue :: String
-}
-
-derive instance repGenericAttribute :: Generic Attribute _
-derive instance eqAttribute :: Eq Attribute
-instance showAttribute :: Show Attribute where
-  show = genericShow
-
-data AttributesDirect = AR (Array (Tuple String String))
-
-derive instance repGenericAttributesDirect :: Generic AttributesDirect _
-derive instance eqAttributesDirect :: Eq AttributesDirect
-instance showAttributesDirect :: Show AttributesDirect where
-  show = genericShow
-
-data AttributesFile = AP (Array Attribute)
-
-derive instance repGenericAttributesFile :: Generic AttributesFile _
-derive instance eqAttributesFile :: Eq AttributesFile
-instance showAttributesFile :: Show AttributesFile where
-  show = genericShow
-
 data Field flgs b fld attrs = Field {
   fieldAccessFlags :: flgs,
   fieldName :: b,
@@ -156,7 +130,7 @@ arlookup nm (AR m) = M.lookup nm (M.fromFoldable m)
 apsize :: AttributesFile -> Int
 apsize (AP list) = A.length list
 
-{- putMethodSignature :: MethodSignature -> Put
+putMethodSignature :: MethodSignature -> Put
 putMethodSignature (MethodSignature args ret) =
   put "("
     <> put ")"
@@ -192,7 +166,7 @@ instance binaryFieldType :: Binary FieldType where
              mbSize <- getInt
              sig <- get
              pure (Array (Just mbSize) sig)
-      _   -> fail "Unknown signature" -}
+      _   -> fail "Unknown signature"
 
 {- instance Binary ReturnSignature where
   put (Returns sig) = put sig

@@ -1,14 +1,15 @@
 module JVM.ClassFile where
 
-import Prelude
 import Data.Binary.Types
 import JVM.ConstantPool
+import Prelude
 
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Set as S
+import JVM.Attributes (AttributesDirect, AttributesFile)
 import JVM.Flags (AccessFlag)
-import JVM.Members (AttributesDirect, AttributesFile, FieldDirect, FieldFile, MethodDirect)
+import JVM.Members (FieldDirect, FieldFile, MethodDirect)
 
 -- | Generic .class file format
 data Class pool accessFlag b fld mthd attr = Class {

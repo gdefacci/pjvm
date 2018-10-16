@@ -3,7 +3,6 @@ module Data.Binary.Decoder where
 import Prelude
 
 import Data.Array as A
-import Data.ArrayBuffer.ArrayBuffer as AB
 import Data.ArrayBuffer.DataView as DV
 import Data.ArrayBuffer.Types (ArrayBuffer, DataView, ByteOffset)
 import Data.Char (fromCharCode)
@@ -24,6 +23,12 @@ decodeBuffer (Decoder getter) buf =
 
 decodeFull :: forall a. Decoder a -> ArrayBuffer -> Effect a
 decodeFull decoder arr = snd <$> (decodeBuffer (consumeAllInput decoder) arr)
+
+lookAhead :: forall a. Decoder a -> Decoder a
+lookAhead (Decoder decoder) =
+  Decoder $ \dv -> \ofs -> do
+    (Tuple _ r) <- decoder dv ofs
+    pure $ Tuple ofs r
 
 runDecoder :: forall a. Decoder a -> DataView -> ByteOffset -> Effect (Tuple Int a)
 runDecoder (Decoder dec) dv ofs = dec dv ofs

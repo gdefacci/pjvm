@@ -3,8 +3,9 @@ module JVM.Members where
 import Prelude
 
 import Data.Array as A
-import Data.Binary.Binary (class Binary, Put, get, put)
-import Data.Binary.Decoder (Decoder(..), fail, getChar8)
+import Data.Binary.Binary (class Binary, Put, foldablePut, get, put)
+import Data.Binary.Decoder (Decoder(..), fail, getChar8, getUInt8, lookAhead)
+import Data.Binary.Encoder (putFoldable)
 import Data.Binary.Types (Word16(..), Word32(..))
 import Data.Foldable (intercalate)
 import Data.Generic.Rep (class Generic)
@@ -130,11 +131,6 @@ arlookup nm (AR m) = M.lookup nm (M.fromFoldable m)
 apsize :: AttributesFile -> Int
 apsize (AP list) = A.length list
 
-putMethodSignature :: MethodSignature -> Put
-putMethodSignature (MethodSignature args ret) =
-  put "("
-    <> put ")"
-
 instance binaryFieldType :: Binary FieldType where
   put SignedByte = put "B"
   put CharByte   = put "C"
@@ -168,15 +164,17 @@ instance binaryFieldType :: Binary FieldType where
              pure (Array (Just mbSize) sig)
       _   -> fail "Unknown signature"
 
-{- instance Binary ReturnSignature where
+instance binaryReturnSignature :: Binary ReturnSignature where
   put (Returns sig) = put sig
   put ReturnsVoid   = put 'V'
 
   get = do
     x <- lookAhead getChar8
     case x of
-      'V' -> skip 1 >> return ReturnsVoid
-      _   -> Returns <$> get -}
+      'V' -> do
+        _ <- getUInt8
+        pure $ ReturnsVoid
+      _   -> get
 
 getInt :: Decoder Int
 getInt = unsafeThrow "todo"
@@ -190,14 +188,11 @@ getToSemicolon = do
          next <- getToSemicolon
          pure $ A.cons x next
 
-
-
-{--
-instance Binary MethodSignature where
-  put (MethodSignature args ret) = do
-    put '('
-    forM_ args put
-    put ')'
+instance binaryMethodSignature :: Binary MethodSignature where
+  put (MethodSignature args ret) =
+    put '(' <>
+    foldablePut args <>
+    put ')' <>
     put ret
 
   get =  do
@@ -209,5 +204,16 @@ instance Binary MethodSignature where
     when (y /= ')') $
       fail "Internal error: method signature without `)' !?"
     ret <- get
-    return (MethodSignature args ret)
---}
+    pure $ MethodSignature args ret
+
+getArgs :: Decoder (Array FieldType)
+getArgs = getArg mempty
+  where
+    getArg :: Array FieldType -> Decoder (Array FieldType)
+    getArg acc = do
+      x <- lookAhead getChar8
+      if x == ')'
+        then pure acc
+        else do
+          v <- get
+          pure $ A.snoc acc v

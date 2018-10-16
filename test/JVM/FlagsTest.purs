@@ -1,13 +1,13 @@
 module JVM.FlagsTest where
 
 import Prelude
-import Effect (Effect)
 import Data.Set as S
-import JVM.Flags
-import Data.BitMask
+import Effect.Aff (Aff)
 
-import Test.QuickCheck
-import Test.QuickCheck.Arbitrary
+import Data.BitMask (class BitMask, maskValue, toMask)
+import JVM.Flags (AccessFlag, FieldAccessFlag, MethodAccessFlag)
+
+import Test.Unit.QuickCheck (quickCheck)
 
 setAndGet :: forall a. BitMask a => Ord a => (Array a) -> Boolean
 setAndGet flsArr =
@@ -16,7 +16,7 @@ setAndGet flsArr =
       msk = toMask mv
   in msk == fls
 
-spec :: Effect Unit
+spec :: Aff Unit
 spec = do
   quickCheck (setAndGet :: Array AccessFlag -> Boolean)
   quickCheck (setAndGet :: Array MethodAccessFlag -> Boolean)

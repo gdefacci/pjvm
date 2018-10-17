@@ -14,11 +14,14 @@ import Data.Foldable (intercalate)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Int (fromString)
+import Data.List.Lazy (replicateM)
 import Data.Map as M
 import Data.Maybe (Maybe(..))
+import Data.Newtype (class Newtype)
 import Data.Set as S
 import Data.String.CodeUnits (fromCharArray)
 import Data.Tuple (Tuple(..))
+import Data.UInt (toInt)
 import Effect.Exception.Unsafe (unsafeThrow)
 import JVM.Attributes (AttributesDirect(..), AttributesFile(..))
 import JVM.Flags (FieldAccessFlag, MethodAccessFlag)
@@ -98,9 +101,11 @@ derive instance eqField :: (Eq flgs, Eq b, Eq fld, Eq attrs) => Eq (Field flgs b
 instance showField :: (Show flgs, Show b, Show fld, Show attrs) => Show (Field flgs b fld attrs) where
   show = genericShow
 
-type FieldDirect = Field (S.Set FieldAccessFlag) String FieldType AttributesDirect
+newtype FieldDirect = FieldDirect (Field (S.Set FieldAccessFlag) String FieldType AttributesDirect)
+newtype FieldFile = FieldFile (Field Word16 Word16 Word16 AttributesFile)
 
-type FieldFile = Field Word16 Word16 Word16 AttributesFile
+derive instance newTypeFieldDirect :: Newtype FieldDirect _
+derive instance newTypeFieldFile :: Newtype FieldFile _
 
 data Method flgs b mthd attrs = Method {
   methodAccessFlags :: flgs,
@@ -134,6 +139,12 @@ arlookup nm (AttributesDirect m) = M.lookup nm (M.fromFoldable m)
 -- | Size of attributes set at File stage
 apsize :: AttributesFile -> Int
 apsize (AttributesFile list) = A.length list
+
+fieldNameType :: FieldDirect -> FieldNameType
+fieldNameType (FieldDirect (Field {fieldName, fieldSignature})) = FieldNameType
+  { ntName : fieldName
+  , ntSignature : fieldSignature
+  }
 
 instance binaryFieldType :: Binary FieldType where
   put SignedByte = put "B"
@@ -197,7 +208,7 @@ getInt = do
              next <- getDigits
              pure $ A.cons c next
         else pure []
- 
+
 getToSemicolon :: Decoder (Array Char)
 getToSemicolon = do
   x <- getChar8
@@ -234,3 +245,22 @@ getArgs = getArg mempty
         else do
           v <- get
           pure $ A.snoc acc v
+
+instance fieldFileBinary :: Binary FieldFile where
+  put (FieldFile (Field {fieldAccessFlags, fieldName, fieldSignature, fieldAttributesCount, fieldAttributes })) =
+    put fieldAccessFlags <>
+    put fieldName <>
+    put fieldSignature <>
+    put fieldAttributesCount <>
+    foldablePut (unwrapFieldAttrs fieldAttributes)
+    where
+      unwrapFieldAttrs (AttributesFile attrs) = attrs
+
+  get = do
+    fieldAccessFlags <- get
+    fieldName <- get
+    fieldSignature <- get
+    fieldAttributesCount @ (Word16 n) <- get
+    fieldAttributes <- (A.fromFoldable >>> AttributesFile) <$> replicateM (toInt n) get
+    pure $ FieldFile $
+      Field {fieldAccessFlags, fieldName, fieldSignature, fieldAttributesCount, fieldAttributes}

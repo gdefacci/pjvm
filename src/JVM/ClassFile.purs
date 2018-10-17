@@ -1,15 +1,17 @@
 module JVM.ClassFile where
 
-import Data.Binary.Types
-import JVM.ConstantPool
 import Prelude
 
+import Data.Array as A
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
+import Data.Maybe (Maybe(..))
 import Data.Set as S
+import Data.Binary.Types (Word16, Word32)
 import JVM.Attributes (AttributesDirect, AttributesFile)
 import JVM.Flags (AccessFlag)
-import JVM.Members (FieldDirect, FieldFile, MethodDirect)
+import JVM.Members (Field(..), FieldDirect(..), FieldFile, MethodDirect)
+import JVM.ConstantPool (PoolDirect, PoolFile)
 
 -- | Generic .class file format
 data Class pool accessFlag b fld mthd attr = Class {
@@ -39,3 +41,12 @@ instance showClass :: (Show pool, Show accessFlag, Show b, Show fld, Show mthd, 
 type ClassDirect = Class PoolDirect (S.Set AccessFlag) String FieldDirect MethodDirect AttributesDirect
 
 type ClassFile = Class PoolFile Word16 Word16 FieldFile Word16 AttributesFile
+
+lookupField :: String -> ClassDirect -> Maybe (FieldDirect)
+lookupField name (Class {classFields}) = look classFields
+  where
+    look arr = lookEntry =<< A.uncons arr
+
+    lookEntry ({head : field @ (FieldDirect (Field {fieldName})), tail : fs})
+      | fieldName == name = Just field
+      | otherwise         = look fs

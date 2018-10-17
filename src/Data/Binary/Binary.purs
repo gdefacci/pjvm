@@ -75,7 +75,7 @@ instance binaryChar :: Binary Char where
 
 instance binaryString :: Binary String where
   put = 
-    ((STR.length >>> fromInt >>> Word16) >>> put) <>
+    (STR.length >>> fromInt >>> Word16 >>> put) <>
     (toCharArray >>> foldablePut)
 
 

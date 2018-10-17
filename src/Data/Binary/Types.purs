@@ -1,10 +1,9 @@
 module Data.Binary.Types where
 
-import Prelude (class Show, class Eq, (<>), show)
+import Data.UInt
 
 import Data.Newtype (class Newtype)
-
-import Data.UInt
+import Prelude (class Eq, class Ord, class Show, Ordering(..), compare, show, (<>))
 
 newtype Word8 = Word8 UInt
 newtype Word16 = Word16 UInt
@@ -18,6 +17,28 @@ derive instance eqWord8 :: Eq Word8
 derive instance eqWord16 :: Eq Word16
 derive instance eqWord32 :: Eq Word32
 derive instance eqWord64 :: Eq Word64
+
+instance ordWord8 :: Ord Word8 where
+  compare (Word8 a) (Word8 b) = compare a b
+
+instance ordWord16 :: Ord Word16 where
+  compare (Word16 a) (Word16 b) = compare a b
+
+instance ordWord32 :: Ord Word32 where
+  compare (Word32 a) (Word32 b) = compare a b
+
+instance ordWord64 :: Ord Word64 where
+  compare (Word64 a1 a2) (Word64 b1 b2) = 
+    let comp1 = compare a1 b1
+    in case comp1 of
+      EQ -> compare a2 b2
+      _ -> comp1
+
+instance ordFloat32 :: Ord Float32 where
+  compare (Float32 a) (Float32 b) = compare a b
+
+instance ordFloat64 :: Ord Float64 where
+  compare (Float64 a) (Float64 b) = compare a b
 
 derive instance newtypeWord8 ::  Newtype Word8 _
 derive instance newtypeWord16 :: Newtype Word16 _

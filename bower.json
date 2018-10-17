@@ -16,7 +16,8 @@
     "purescript-generics-rep": "^6.1.0",
     "bower": "*",
     "install": "^1.0.4",
-    "purescript-contravariant": "^4.0.0"
+    "purescript-contravariant": "^4.0.0",
+    "purescript-unicode": "^4.0.1"
   },
   "devDependencies": {
     "purescript-quickcheck": "^5.0.0",

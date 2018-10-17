@@ -4,12 +4,16 @@ import Prelude
 
 import Data.Array as A
 import Data.Binary.Binary (class Binary, Put, foldablePut, get, put)
-import Data.Binary.Decoder (Decoder(..), fail, getChar8, getUInt8, lookAhead)
+import Data.Binary.Decoder (Decoder(..), fail, getChar8, getUInt8, lookAhead, skip)
 import Data.Binary.Encoder (putFoldable)
 import Data.Binary.Types (Word16(..), Word32(..))
+import Data.Char (toCharCode)
+import Data.Char as CH
+import Data.Char.Unicode (isDigit)
 import Data.Foldable (intercalate)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
+import Data.Int (fromString)
 import Data.Map as M
 import Data.Maybe (Maybe(..))
 import Data.Set as S
@@ -117,19 +121,19 @@ type MethodFile = Method Word16 Word16 Word16 AttributesFile
 
 -- | Size of attributes set at Direct stage
 arsize :: AttributesDirect -> Int
-arsize (AR m) = A.length m
+arsize (AttributesDirect m) = A.length m
 
 -- | Associative list of attributes at Direct stage
 arlist :: AttributesDirect -> (Array (Tuple String String))
-arlist (AR m) = m
+arlist (AttributesDirect m) = m
 
 -- | Map of attributes at Direct stage
 arlookup :: String -> AttributesDirect -> Maybe String
-arlookup nm (AR m) = M.lookup nm (M.fromFoldable m)
+arlookup nm (AttributesDirect m) = M.lookup nm (M.fromFoldable m)
 
 -- | Size of attributes set at File stage
 apsize :: AttributesFile -> Int
-apsize (AP list) = A.length list
+apsize (AttributesFile list) = A.length list
 
 instance binaryFieldType :: Binary FieldType where
   put SignedByte = put "B"
@@ -177,8 +181,23 @@ instance binaryReturnSignature :: Binary ReturnSignature where
       _   -> get
 
 getInt :: Decoder Int
-getInt = unsafeThrow "todo"
+getInt = do
+    sds <- getDigits
+    case fromString $ fromCharArray sds of
+      Nothing -> fail "could not parse int"
+      (Just n) -> pure n
 
+  where
+    getDigits :: Decoder (Array Char)
+    getDigits = do
+      c <- lookAhead getChar8
+      if isDigit c
+        then do
+             skip 1
+             next <- getDigits
+             pure $ A.cons c next
+        else pure []
+ 
 getToSemicolon :: Decoder (Array Char)
 getToSemicolon = do
   x <- getChar8
@@ -197,12 +216,10 @@ instance binaryMethodSignature :: Binary MethodSignature where
 
   get =  do
     x <- getChar8
-    when (x /= '(') $
-      fail "Cannot parse method signature: no starting `(' !"
+    when (x /= '(') $ fail "Cannot parse method signature: no starting `(' !"
     args <- getArgs
     y <- getChar8
-    when (y /= ')') $
-      fail "Internal error: method signature without `)' !?"
+    when (y /= ')') $ fail "Internal error: method signature without `)' !?"
     ret <- get
     pure $ MethodSignature args ret
 

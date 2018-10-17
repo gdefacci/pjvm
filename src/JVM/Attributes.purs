@@ -20,14 +20,14 @@ derive instance eqAttribute :: Eq Attribute
 instance showAttribute :: Show Attribute where
   show = genericShow
 
-data AttributesDirect = AR (Array (Tuple String String))
+data AttributesDirect = AttributesDirect (Array (Tuple String String))
 
 derive instance repGenericAttributesDirect :: Generic AttributesDirect _
 derive instance eqAttributesDirect :: Eq AttributesDirect
 instance showAttributesDirect :: Show AttributesDirect where
   show = genericShow
 
-data AttributesFile = AP (Array Attribute)
+data AttributesFile = AttributesFile (Array Attribute)
 
 derive instance repGenericAttributesFile :: Generic AttributesFile _
 derive instance eqAttributesFile :: Eq AttributesFile

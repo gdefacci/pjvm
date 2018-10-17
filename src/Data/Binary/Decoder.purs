@@ -51,6 +51,8 @@ instance decoderBind :: Bind Decoder where
       let (Decoder getter') = f a
       getter' dv ofst1
 
+instance decoderMonad :: Monad Decoder
+
 getByteOffset :: Decoder Int
 getByteOffset = Decoder $ \_ -> \ofs -> pure $ Tuple ofs ofs
 
@@ -133,6 +135,16 @@ getChar8 = do
   case CH.fromCharCode (toInt x) of
     Nothing -> fail $ "Invalid char code" <> (show x)
     (Just ch) -> pure ch
+
+getRep :: forall a. Int -> Decoder a -> Decoder (Array a)
+getRep 0 _ = pure []
+getRep n decoder = do
+  r1 <- decoder
+  rest <- getRep (n - 1) decoder
+  pure $ A.cons r1 rest
+
+skip :: Int -> Decoder Unit
+skip n = void $ getRep n getUInt8
 
 getChar :: Decoder Char
 getChar =

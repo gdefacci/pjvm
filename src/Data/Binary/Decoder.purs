@@ -125,9 +125,14 @@ consumeAllInput decoder = do
     else pure res
 
 getString :: Decoder String
-getString = do
+getString = (\(ByteLengthString _ txt) -> txt) <$> getByteLengthString
+
+data ByteLengthString = ByteLengthString Int String
+
+getByteLengthString :: Decoder ByteLengthString
+getByteLengthString = do
   len <- toInt <$> getUInt16
-  fromCharArray <$> (withSlice len $ getRest getChar)
+  (ByteLengthString len) <$> fromCharArray <$> (withSlice len $ getRest getChar)
 
 getChar8 :: Decoder Char
 getChar8 = do

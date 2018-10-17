@@ -3,7 +3,7 @@ module Data.Binary.Binary where
 import Prelude
 
 import Data.ArrayBuffer.Types (DataView, ByteOffset)
-import Data.Binary.Decoder (Decoder(..), getChar, getChar8, getFloat32, getFloat64, getString, getUInt16, getUInt32, getUInt8)
+import Data.Binary.Decoder (ByteLengthString(..), Decoder(..), getChar, getChar8, getFloat32, getFloat64, getString, getUInt16, getUInt32, getUInt8, getByteLengthString)
 import Data.Binary.Encoder (Encoder, putChar, putFloat32, putFloat64, putUInt16, putUInt32, putUInt8)
 import Data.Binary.Types (Float32(..), Float64(..), Word16(..), Word32(..), Word64(..), Word8(..))
 import Data.Foldable (class Foldable, foldMap)
@@ -39,7 +39,7 @@ fromEncoder f a = Put (f a)
 
 instance binaryWord8 :: Binary Word8 where
   put = unwrap >>> (fromEncoder putUInt8)
-  get = Word8 <$> getUInt8 
+  get = Word8 <$> getUInt8
 
 instance binaryWord16 :: Binary Word16 where
   put = unwrap >>> (fromEncoder putUInt16)
@@ -69,17 +69,27 @@ instance binaryFloat64 :: Binary Float64 where
   put = unwrap >>> (fromEncoder putFloat64)
   get = Float64 <$> getFloat64
 
-instance binaryChar :: Binary Char where 
+instance binaryChar :: Binary Char where
   put = (fromEncoder putChar)
   get = getChar
 
 instance binaryString :: Binary String where
-  put = 
+  put =
     (STR.length >>> fromInt >>> Word16 >>> put) <>
     (toCharArray >>> foldablePut)
 
-
   get = getString
+
+instance binaryByteLengthString :: Binary ByteLengthString where
+  put =
+    (getLen >>> fromInt >>> Word16 >>> put) <>
+    (getStr >>> toCharArray >>> foldablePut)
+    where
+      getLen (ByteLengthString l _) = l
+      getStr (ByteLengthString _ s) = s
+
+  get = getByteLengthString
+
 
 foldablePut :: forall f a. Foldable f => Binary a => f a -> Put
 foldablePut = foldMap put

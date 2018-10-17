@@ -4,9 +4,10 @@ import Prelude
 
 import Data.Binary.Binary (class Binary, put, get)
 import Data.Binary.Decoder (ByteLengthString(..))
-import Data.Binary.Types (Word16(..), Word32(..))
+import Data.Binary.Types (Word16, Word32(..))
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
+import Data.List (fromFoldable)
 import Data.Tuple (Tuple)
 import Data.UInt (fromInt)
 
@@ -50,4 +51,8 @@ instance attributeBinary :: Binary Attribute where
     (ByteLengthString len attributeValue) <- get
     pure $
       Attribute { attributeName, attributeValue, attributeLength : Word32 $ fromInt len }
+
+attributesList :: AttributesFile -> Array Attribute
+attributesList (AttributesFile attrs) = attrs
+
 

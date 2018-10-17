@@ -4,12 +4,12 @@ import Prelude
 
 import Control.Monad.State as ST
 import Data.Array as A
-import Data.Binary.Binary (Put(..), get, put)
-import Data.Binary.Decoder (Decoder(..), fail)
+import Data.Binary.Binary (Put, get, put)
+import Data.Binary.Decoder (Decoder, fail)
 import Data.Binary.Types (Float32(..), Float64(..), Word16(..), Word32(..), Word64(..), Word8(..))
 import Data.Foldable (foldMap)
 import Data.Map as M
-import Data.Tuple (Tuple(..), snd)
+import Data.Tuple (Tuple(..))
 import Data.UInt (fromInt, toInt)
 import JVM.Members (FieldNameType(..), MethodNameType(..))
 
@@ -55,7 +55,7 @@ long (CDouble _) = true
 long _           = false
 
 putPool :: PoolFile -> Put
-putPool pool = 
+putPool pool =
     let list :: Array ConstantFile
         list = A.fromFoldable (M.values pool)
         d = A.length $ A.filter long list
@@ -72,22 +72,22 @@ putPool pool =
     putC (CLong x)    = put (Word8 $ fromInt 5) <> put x
     putC (CDouble x)  = put (Word8 $ fromInt 6) <> put x
     putC (CNameType i j) = put (Word8 $ fromInt 12) <> put i <> put j
-    putC (CUTF8 {getString}) = 
+    putC (CUTF8 {getString}) =
                      put (Word8 $ fromInt 1) <>
                      put getString
-    putC (CUnicode {getString}) = 
+    putC (CUnicode {getString}) =
                      put (Word8 $ fromInt 2) <>
                      put getString
 
-getPool :: Word16 -> Decoder (PoolFile)
-getPool (Word16 n) = do
+getPool :: Int -> Decoder (PoolFile)
+getPool n = do
     items <- ST.evalStateT go (Word16 $ fromInt 1)
     pure $ M.fromFoldable items
   where
     go :: ST.StateT Word16 Decoder (Array (Tuple Word16 ConstantFile))
     go = do
       (Word16 i) <- ST.get
-      if i > n
+      if i > (fromInt n)
         then pure []
         else do
           c <- ST.lift getC

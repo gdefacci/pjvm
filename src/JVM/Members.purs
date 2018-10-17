@@ -23,7 +23,7 @@ import Data.String.CodeUnits (fromCharArray)
 import Data.Tuple (Tuple(..))
 import Data.UInt (toInt)
 import Effect.Exception.Unsafe (unsafeThrow)
-import JVM.Attributes (AttributesDirect(..), AttributesFile(..))
+import JVM.Attributes (AttributesDirect(..), AttributesFile(..), attributesList)
 import JVM.Flags (FieldAccessFlag, MethodAccessFlag)
 
 -- | Field signature format
@@ -252,9 +252,7 @@ instance fieldFileBinary :: Binary FieldFile where
     put fieldName <>
     put fieldSignature <>
     put fieldAttributesCount <>
-    foldablePut (unwrapFieldAttrs fieldAttributes)
-    where
-      unwrapFieldAttrs (AttributesFile attrs) = attrs
+    foldablePut (attributesList fieldAttributes)
 
   get = do
     fieldAccessFlags <- get

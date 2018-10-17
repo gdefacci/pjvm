@@ -3,15 +3,20 @@ module JVM.ClassFile where
 import Prelude
 
 import Data.Array as A
+import Data.Binary.Binary (class Binary, foldablePut, put, get)
+import Data.Binary.Decoder (fail)
+import Data.Binary.Types (Word16(..), Word32(..))
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
+import Data.List.Lazy (replicateM)
 import Data.Maybe (Maybe(..))
+import Data.Newtype (unwrap)
 import Data.Set as S
-import Data.Binary.Types (Word16, Word32)
-import JVM.Attributes (AttributesDirect, AttributesFile)
+import Data.UInt (fromInt, fromNumber, toInt)
+import JVM.Attributes (AttributesDirect, AttributesFile(..), attributesList)
+import JVM.ConstantPool (PoolDirect, PoolFile, getPool, putPool)
 import JVM.Flags (AccessFlag)
 import JVM.Members (Field(..), FieldDirect(..), FieldFile, MethodDirect)
-import JVM.ConstantPool (PoolDirect, PoolFile)
 
 -- | Generic .class file format
 data Class pool accessFlag b fld mthd attr = Class {
@@ -30,7 +35,7 @@ data Class pool accessFlag b fld mthd attr = Class {
   classMethodsCount :: Word16,    -- ^ Number of class methods
   classMethods :: Array mthd,     -- ^ Class methods
   classAttributesCount :: Word16, -- ^ Number of class attributes
-  classAttributes :: Array attr   -- ^ Class attributes
+  classAttributes :: attr   -- ^ Class attributes
   }
 
 derive instance repGenericClass :: Generic (Class pool accessFlag b fld mthd attr) _
@@ -38,15 +43,65 @@ derive instance eqClass :: (Eq pool, Eq accessFlag, Eq b, Eq fld, Eq mthd, Eq at
 instance showClass :: (Show pool, Show accessFlag, Show b, Show fld, Show mthd, Show attr) => Show (Class pool accessFlag b fld mthd attr) where
   show = genericShow
 
-type ClassDirect = Class PoolDirect (S.Set AccessFlag) String FieldDirect MethodDirect AttributesDirect
-
-type ClassFile = Class PoolFile Word16 Word16 FieldFile Word16 AttributesFile
+newtype ClassDirect = ClassDirect (Class PoolDirect (S.Set AccessFlag) String FieldDirect MethodDirect AttributesDirect)
+newtype ClassFile = ClassFile (Class PoolFile Word16 Word16 FieldFile Word16 AttributesFile)
 
 lookupField :: String -> ClassDirect -> Maybe (FieldDirect)
-lookupField name (Class {classFields}) = look classFields
+lookupField name (ClassDirect(Class {classFields})) = look classFields
   where
     look arr = lookEntry =<< A.uncons arr
 
     lookEntry ({head : field @ (FieldDirect (Field {fieldName})), tail : fs})
       | fieldName == name = Just field
       | otherwise         = look fs
+
+instance binaryClassFile :: Binary ClassFile where
+  put (ClassFile (Class {  magic,minorVersion,majorVersion,constsPoolSize,constsPool,accessFlags,
+                thisClass,superClass,interfacesCount,interfaces,classFieldsCount,
+                classFields,classMethodsCount,classMethods,classAttributesCount,classAttributes
+              })) =
+    put magic <>
+    put minorVersion <>
+    put majorVersion <>
+    putPool constsPool <>
+    put accessFlags <>
+    put thisClass <>
+    put superClass <>
+    put interfacesCount <>
+    foldablePut interfaces <>
+    put classFieldsCount <>
+    foldablePut classFields <>
+    put classMethodsCount <>
+    foldablePut classMethods <>
+    put classAttributesCount <>
+    foldablePut (attributesList classAttributes)
+
+  get = do
+    let xCAFEBABE = Word32 $ fromNumber 3405691582.0
+    magic <- get
+    when (magic /= xCAFEBABE) $
+      fail $ "Invalid .class file MAGIC value: " <> show magic
+    minorVersion <- get
+    majorVersion <- get
+    when ((toInt $ unwrap majorVersion) > 50) $
+      fail $ "Too new .class file format: " <> show majorVersion
+    constsPoolSize <- get
+    constsPool <- getPool ((toInt $ unwrap $ constsPoolSize) - 1)
+    accessFlags <-  get
+    thisClass <- get
+    superClass <- get
+    interfacesCount <- get
+    interfaces <- A.fromFoldable <$> replicateM (toInt $ unwrap interfacesCount) get
+    classFieldsCount <- get
+    classFields <- A.fromFoldable <$> replicateM (toInt $ unwrap classFieldsCount) get
+    classMethodsCount <- get
+    classMethods <- A.fromFoldable <$> replicateM (toInt $ unwrap classMethodsCount) get
+    classAttributesCount <- get
+    classAttributes <- (A.fromFoldable >>> AttributesFile) <$> replicateM (toInt $ unwrap $ classAttributesCount) get
+    pure $ ClassFile $ Class
+              { magic,minorVersion,majorVersion,constsPoolSize,constsPool,accessFlags,
+                thisClass,superClass,interfacesCount,interfaces,classFieldsCount,
+                classFields,classMethodsCount,classMethods,classAttributesCount,classAttributes
+              }
+
+

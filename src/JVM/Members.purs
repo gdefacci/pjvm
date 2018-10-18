@@ -4,10 +4,10 @@ import Prelude
 
 import Data.Array as A
 import Data.Binary.Binary (class Binary, Put, foldablePut, get, put)
-import Data.Binary.Decoder (Decoder(..), fail, getChar8, getUInt8, lookAhead, skip)
+import Data.Binary.Decoder (Decoder(..), ParserError(..), fail, getChar8, getUInt8, lookAhead, skip)
 import Data.Binary.Encoder (putFoldable)
 import Data.Binary.Types (Word16(..), Word32(..))
-import Data.Char (toCharCode)
+import Data.Char (fromCharCode, toCharCode)
 import Data.Char as CH
 import Data.Char.Unicode (isDigit)
 import Data.Foldable (intercalate)
@@ -177,7 +177,7 @@ instance binaryFieldType :: Binary FieldType where
              mbSize <- getInt
              sig <- get
              pure (Array (Just mbSize) sig)
-      _   -> fail "Unknown signature"
+      _   -> fail (\offset -> GenericParserError { offset, message: "Unknown signature"})
 
 instance binaryReturnSignature :: Binary ReturnSignature where
   put (Returns sig) = put sig
@@ -195,7 +195,7 @@ getInt :: Decoder Int
 getInt = do
     sds <- getDigits
     case fromString $ fromCharArray sds of
-      Nothing -> fail "could not parse int"
+      Nothing -> fail (\offset -> GenericParserError { offset, message: "Error parsing Int " <> fromCharArray sds} )
       (Just n) -> pure n
 
   where
@@ -227,10 +227,10 @@ instance binaryMethodSignature :: Binary MethodSignature where
 
   get =  do
     x <- getChar8
-    when (x /= '(') $ fail "Cannot parse method signature: no starting `(' !"
+    when (x /= '(') $ fail (\offset -> GenericParserError { offset, message: "Cannot parse method signature: no starting `(' !" } )
     args <- getArgs
     y <- getChar8
-    when (y /= ')') $ fail "Internal error: method signature without `)' !?"
+    when (y /= ')') $ fail (\offset -> GenericParserError { offset, message: "Internal error: method signature without `)' !?" })
     ret <- get
     pure $ MethodSignature args ret
 

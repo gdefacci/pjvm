@@ -7,6 +7,9 @@ import Data.ArrayBuffer.DataView as DV
 import Data.ArrayBuffer.Types (ArrayBuffer, DataView, ByteOffset)
 import Data.Char (fromCharCode)
 import Data.Char as CH
+import Data.Either (Either(..))
+import Data.Generic.Rep (class Generic)
+import Data.Generic.Rep.Show (genericShow)
 import Data.Int.Bits (shl, (.&.), (.|.))
 import Data.Maybe (Maybe(..))
 import Data.String.CodeUnits (fromCharArray)
@@ -14,12 +17,24 @@ import Data.Tuple (Tuple(..), snd)
 import Data.UInt (UInt, toInt)
 import Effect (Effect)
 import Effect.Exception (throw)
+import Effect.Unsafe (unsafePerformEffect)
 
-newtype Decoder a = Decoder (DataView -> ByteOffset -> Effect (Tuple Int a))
+data ParserError =  NotEnoughBytes { offset::Int, required::Int, avaiable::Int}
+                    | UnrecognizedChar { offset::Int, charCode :: UInt }
+                    | InputPartiallyParsed { offset::Int }
+                    | GenericParserError { offset::Int, message::String }
+
+derive instance genericParserError :: Generic ParserError _
+instance showParserError :: Show ParserError where
+  show = genericShow
+
+newtype Decoder a = Decoder (DataView -> ByteOffset -> Either ParserError (Tuple Int a))
 
 decodeBuffer :: forall a. Decoder a -> ArrayBuffer -> Effect (Tuple Int a)
-decodeBuffer (Decoder getter) buf =
-  getter (DV.whole buf) 0
+decodeBuffer decoder buf =
+  case runDecoder decoder (DV.whole buf) 0 of
+    (Left err) -> throw (show err)
+    (Right v) -> pure $ v
 
 decodeFull :: forall a. Decoder a -> ArrayBuffer -> Effect a
 decodeFull decoder arr = snd <$> (decodeBuffer (consumeAllInput decoder) arr)
@@ -30,7 +45,7 @@ lookAhead (Decoder decoder) =
     (Tuple _ r) <- decoder dv ofs
     pure $ Tuple ofs r
 
-runDecoder :: forall a. Decoder a -> DataView -> ByteOffset -> Effect (Tuple Int a)
+runDecoder :: forall a. Decoder a -> DataView -> ByteOffset -> Either ParserError (Tuple Int a)
 runDecoder (Decoder dec) dv ofs = dec dv ofs
 
 derive instance decoderFunctor :: Functor Decoder
@@ -74,18 +89,17 @@ withSlice :: forall a. Int -> Decoder a -> Decoder a
 withSlice sliceLength (Decoder decoder) =
   Decoder $ \dv -> \ofs ->
     case DV.slice ofs sliceLength (DV.buffer dv) of
-      Nothing -> throw $  "Not enough bytes, avaiable " <> show ((DV.byteLength dv) - ofs) <>
-                          "required " <> (show sliceLength)
+      Nothing -> Left $ NotEnoughBytes { offset: ofs, avaiable: ((DV.byteLength dv) - ofs), required: sliceLength }
       (Just sliceDv) -> do
         (Tuple len r) <- decoder sliceDv 0
         pure $ Tuple (ofs + len) r
 
 sized :: forall a. Int -> DV.Getter a -> Decoder a
 sized n f = Decoder $ \dv -> \ofs ->
-  (toResult ofs) =<< f dv ofs
+  toResult n dv ofs (unsafePerformEffect $ f dv ofs)
   where
-    toResult _ Nothing = throw "EOF"
-    toResult ofs (Just v) = pure $ Tuple (ofs+n) v
+    toResult required dv offset Nothing = Left $ NotEnoughBytes { offset, avaiable: ((DV.byteLength dv) - offset), required }
+    toResult _ _  ofs (Just v) = Right $ Tuple (ofs+n) v
 
 getUInt8 :: Decoder UInt
 getUInt8 = sized 1 $ DV.getUint8
@@ -102,8 +116,8 @@ getFloat32 = sized 4 $ DV.getFloat32be
 getFloat64 :: Decoder Number
 getFloat64 = sized 8 $ DV.getFloat64be
 
-fail :: forall a. String -> Decoder a
-fail msg = Decoder $ \dv -> \ofst -> throw $ "Error at " <> (show ofst) <> ". " <> msg
+fail :: forall a. (ByteOffset -> ParserError) -> Decoder a
+fail err = Decoder $ \_ -> \ofst -> Left $ err ofst
 
 getRest :: forall a. Decoder a -> Decoder (Array a)
 getRest decoder = do
@@ -121,7 +135,7 @@ consumeAllInput decoder = do
   res <- decoder
   more <- hasMoreBytes
   if more
-    then fail "Expecting to consume the input completelly"
+    then fail (\offset -> InputPartiallyParsed {offset})
     else pure res
 
 getString :: Decoder String
@@ -138,7 +152,7 @@ getChar8 :: Decoder Char
 getChar8 = do
   x <- getUInt8
   case CH.fromCharCode (toInt x) of
-    Nothing -> fail $ "Invalid char code" <> (show x)
+    Nothing -> fail (\offset -> UnrecognizedChar { offset, charCode: x } )
     (Just ch) -> pure ch
 
 getRep :: forall a. Int -> Decoder a -> Decoder (Array a)
@@ -190,5 +204,5 @@ getChar =
         pure $ Just $ (shl 12 (a .&. x0f)) .|. (shl 6 (b .&. x3f)) .|. (c .&. x3f)
       _ -> pure Nothing
     case fromCharCode =<< resCharCode of
-      Nothing -> fail $ "cant convert code " <> (show uchr8) <> "to char "
+      Nothing -> fail $ (\offset -> UnrecognizedChar { offset, charCode: uchr8 } )
       (Just ch) -> pure ch

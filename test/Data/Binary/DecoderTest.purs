@@ -6,19 +6,15 @@ import Data.ArrayBuffer.ArrayBuffer as AB
 import Data.ArrayBuffer.DataView as DV
 import Data.ArrayBuffer.Types (ArrayBuffer, DataView)
 import Data.Binary.Binary (get)
-import Data.Binary.Decoder (Decoder, decodeFull, getString, runDecoder)
+import Data.Binary.Decoder (Decoder, decodeBuffer, decodeFull, getString, runDecoder)
 import Data.Binary.Types (Word16(..), Word32(..), Word64(..))
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Eq (genericEq)
 import Data.Generic.Rep.Show (genericShow)
-
 import Data.Tuple (Tuple(..))
 import Data.UInt (fromInt)
 import Effect.Aff (Aff)
 import Effect.Class (liftEffect)
-
-
-
 import Test.Unit.Assert as Assert
 
 
@@ -29,15 +25,10 @@ spec = do
   testData1
   testRec
 
-dataViewFromArray :: Array Int -> DataView
-dataViewFromArray arr =
-  let buf = AB.fromIntArray arr
-  in DV.whole buf
-
 testGetString :: Aff Unit
 testGetString = do
-  let dv = dataViewFromArray [0, 5, 100, 101, 102, 103, 104]
-  (Tuple ofst str) <- liftEffect $ runDecoder getString dv 0
+  let ab = AB.fromIntArray [0, 5, 100, 101, 102, 103, 104]
+  (Tuple ofst str) <- liftEffect $ decodeBuffer getString ab
   Assert.assert "string must be correct" $ str == "defgh"
   Assert.assert "must parse all the string" $ ofst == 7
 

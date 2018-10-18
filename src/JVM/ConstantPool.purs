@@ -5,7 +5,7 @@ import Prelude
 import Control.Monad.State as ST
 import Data.Array as A
 import Data.Binary.Binary (Put, get, put)
-import Data.Binary.Decoder (Decoder, fail)
+import Data.Binary.Decoder (Decoder, ParserError(..), fail)
 import Data.Binary.Types (Float32(..), Float64(..), Word16(..), Word32(..), Word64(..), Word8(..))
 import Data.Foldable (foldMap)
 import Data.Map as M
@@ -119,4 +119,4 @@ getPool n = do
         10 -> CMethod       <$> get <*> get
         11 -> CIfaceMethod  <$> get <*> get
         12 -> CNameType     <$> get <*> get
-        _  -> fail $ "Unknown constants pool entry tag: " <> show tag
+        _  -> fail (\offset -> GenericParserError { offset, message: "Unknown constants pool entry tag: " <> show tag})

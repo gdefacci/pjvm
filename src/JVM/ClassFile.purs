@@ -4,7 +4,7 @@ import Prelude
 
 import Data.Array as A
 import Data.Binary.Binary (class Binary, foldablePut, put, get)
-import Data.Binary.Decoder (fail)
+import Data.Binary.Decoder (ParserError(..), fail)
 import Data.Binary.Types (Word16(..), Word32(..))
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
@@ -12,7 +12,7 @@ import Data.List.Lazy (replicateM)
 import Data.Maybe (Maybe(..))
 import Data.Newtype (unwrap)
 import Data.Set as S
-import Data.UInt (fromInt, fromNumber, toInt)
+import Data.UInt (fromNumber, toInt)
 import JVM.Attributes (AttributesDirect, AttributesFile(..), attributesList)
 import JVM.ConstantPool (PoolDirect, PoolFile, getPool, putPool)
 import JVM.Flags (AccessFlag)
@@ -79,12 +79,12 @@ instance binaryClassFile :: Binary ClassFile where
   get = do
     let xCAFEBABE = Word32 $ fromNumber 3405691582.0
     magic <- get
-    when (magic /= xCAFEBABE) $
-      fail $ "Invalid .class file MAGIC value: " <> show magic
+    when (magic /= xCAFEBABE) $ 
+      fail (\offset -> GenericParserError { offset, message: "Invalid .class file MAGIC value: " <> show magic })
     minorVersion <- get
     majorVersion <- get
-    when ((toInt $ unwrap majorVersion) > 50) $
-      fail $ "Too new .class file format: " <> show majorVersion
+    when ((toInt $ unwrap majorVersion) > 50) $ 
+      fail (\offset -> GenericParserError { offset, message: "Too new .class file format: " <> show majorVersion })
     constsPoolSize <- get
     constsPool <- getPool ((toInt $ unwrap $ constsPoolSize) - 1)
     accessFlags <-  get

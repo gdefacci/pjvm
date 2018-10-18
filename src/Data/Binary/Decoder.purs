@@ -39,12 +39,6 @@ decodeBuffer decoder buf =
 decodeFull :: forall a. Decoder a -> ArrayBuffer -> Effect a
 decodeFull decoder arr = snd <$> (decodeBuffer (consumeAllInput decoder) arr)
 
-lookAhead :: forall a. Decoder a -> Decoder a
-lookAhead (Decoder decoder) =
-  Decoder $ \dv -> \ofs -> do
-    (Tuple _ r) <- decoder dv ofs
-    pure $ Tuple ofs r
-
 runDecoder :: forall a. Decoder a -> DataView -> ByteOffset -> Either ParserError (Tuple Int a)
 runDecoder (Decoder dec) dv ofs = dec dv ofs
 
@@ -68,15 +62,21 @@ instance decoderBind :: Bind Decoder where
 
 instance decoderMonad :: Monad Decoder
 
-getByteOffset :: Decoder Int
-getByteOffset = Decoder $ \_ -> \ofs -> pure $ Tuple ofs ofs
+fail :: forall a. (ByteOffset -> ParserError) -> Decoder a
+fail err = Decoder $ \_ -> \ofst -> Left $ err ofst
+
+getOffset :: Decoder ByteOffset
+getOffset = Decoder $ \_ -> \ofs -> pure $ Tuple ofs ofs
+
+setOffset :: ByteOffset -> Decoder Unit
+setOffset ofs = Decoder $ \_ -> \_ -> pure $ Tuple ofs unit
 
 getDataViewByteLenght :: Decoder Int
 getDataViewByteLenght = Decoder $ \dv -> \ofs -> pure $ Tuple ofs (DV.byteLength dv)
 
 getRemainingBytesLength :: Decoder Int
 getRemainingBytesLength = do
-  ofs <- getByteOffset
+  ofs <- getOffset
   tot <- getDataViewByteLenght
   pure $ tot - ofs
 
@@ -84,6 +84,13 @@ hasMoreBytes :: Decoder Boolean
 hasMoreBytes = do
   rb <- getRemainingBytesLength
   pure $ rb > 0
+
+lookAhead :: forall a. Decoder a -> Decoder a
+lookAhead decoder = do
+  ofs <- getOffset
+  r <- decoder
+  setOffset ofs
+  pure $ r
 
 withSlice :: forall a. Int -> Decoder a -> Decoder a
 withSlice sliceLength (Decoder decoder) =
@@ -116,9 +123,6 @@ getFloat32 = sized 4 $ DV.getFloat32be
 getFloat64 :: Decoder Number
 getFloat64 = sized 8 $ DV.getFloat64be
 
-fail :: forall a. (ByteOffset -> ParserError) -> Decoder a
-fail err = Decoder $ \_ -> \ofst -> Left $ err ofst
-
 getRest :: forall a. Decoder a -> Decoder (Array a)
 getRest decoder = do
   more <- hasMoreBytes
@@ -135,7 +139,7 @@ consumeAllInput decoder = do
   res <- decoder
   more <- hasMoreBytes
   if more
-    then fail (\offset -> InputPartiallyParsed {offset})
+    then fail $ \offset -> InputPartiallyParsed {offset}
     else pure res
 
 getString :: Decoder String
@@ -152,7 +156,7 @@ getChar8 :: Decoder Char
 getChar8 = do
   x <- getUInt8
   case CH.fromCharCode (toInt x) of
-    Nothing -> fail (\offset -> UnrecognizedChar { offset, charCode: x } )
+    Nothing -> fail $ \offset -> UnrecognizedChar { offset, charCode: x }
     (Just ch) -> pure ch
 
 getRep :: forall a. Int -> Decoder a -> Decoder (Array a)
@@ -163,7 +167,9 @@ getRep n decoder = do
   pure $ A.cons r1 rest
 
 skip :: Int -> Decoder Unit
-skip n = void $ getRep n getUInt8
+skip n = do
+  ofs <- getOffset
+  setOffset $ ofs + n
 
 getChar :: Decoder Char
 getChar =
@@ -204,5 +210,5 @@ getChar =
         pure $ Just $ (shl 12 (a .&. x0f)) .|. (shl 6 (b .&. x3f)) .|. (c .&. x3f)
       _ -> pure Nothing
     case fromCharCode =<< resCharCode of
-      Nothing -> fail $ (\offset -> UnrecognizedChar { offset, charCode: uchr8 } )
+      Nothing -> fail $ \offset -> UnrecognizedChar { offset, charCode: uchr8 }
       (Just ch) -> pure ch

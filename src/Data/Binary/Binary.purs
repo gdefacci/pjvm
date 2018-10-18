@@ -17,6 +17,8 @@ import Effect (Effect)
 import Effect.Exception (throw)
 import Effect.Exception.Unsafe (unsafeThrow)
 
+import Data.Array (replicate)
+
 newtype Put = Put (DataView -> ByteOffset -> Effect Int)
 
 instance semigroupPut :: Semigroup Put where
@@ -90,6 +92,11 @@ instance binaryByteLengthString :: Binary ByteLengthString where
 
   get = getByteLengthString
 
-
 foldablePut :: forall f a. Foldable f => Binary a => f a -> Put
 foldablePut = foldMap put
+
+pad :: Word8 -> (ByteOffset -> ByteOffset) -> Put
+pad w f = Put $ \dv -> \ofs ->
+  let delta = f ofs
+      (Put fp) = foldablePut (replicate (delta - 1) w)
+  in fp dv ofs

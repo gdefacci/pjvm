@@ -42,21 +42,3 @@ derive instance genericCodeException :: Generic CodeException _
 instance showCodeException :: Show CodeException where
   show = genericShow
 
--- | JVM array type (primitive types)
-data ArrayType =
-    T_BOOLEAN  -- ^ 4
-  | T_CHAR     -- ^ 5
-  | T_FLOAT    -- ^ 6
-  | T_DOUBLE   -- ^ 7
-  | T_BYTE     -- ^ 8
-  | T_SHORT    -- ^ 9
-  | T_INT      -- ^ 10
-  | T_LONG     -- ^ 11
-  -- deriving (Eq, Show, Enum)
-
-derive instance eqArrayType :: Eq ArrayType
-
-derive instance genericArrayType :: Generic ArrayType _
-
-instance showArrayType :: Show ArrayType where
-  show = genericShow

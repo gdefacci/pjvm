@@ -1,11 +1,15 @@
 module JVM.Instruction where
 
+import Data.Binary.Types
 import Prelude
 
-import Data.Binary.Types 
+import Data.Binary.Binary (class Binary, Put(..), get, put)
+import Data.Binary.Decoder (Decoder(..), ParserError(..), fail)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
+import Data.Maybe (Maybe(..))
 import Data.Tuple (Tuple(..))
+import Data.UInt (fromInt, toInt)
 
 data IMM =
     I0     -- ^ 0
@@ -20,6 +24,19 @@ derive instance genericIMM :: Generic IMM _
 
 instance showIMM :: Show IMM where
   show = genericShow
+
+immOrdValue :: IMM -> Int 
+immOrdValue I0 = 0
+immOrdValue I1 = 1
+immOrdValue I2 = 2
+immOrdValue I3 = 3
+
+toIMMEnum :: Int -> Maybe IMM
+toIMMEnum 0 = Just I0
+toIMMEnum 1 = Just I1
+toIMMEnum 2 = Just I2
+toIMMEnum 3 = Just I3
+toIMMEnum _ = Nothing
 
   -- | Comparation operation type. Not all CMP instructions support all operations.
 data CMP =
@@ -37,6 +54,14 @@ derive instance genericCMP :: Generic CMP _
 
 instance showCMP :: Show CMP where
   show = genericShow
+
+cmpOrd :: CMP -> Int
+cmpOrd C_EQ = 0
+cmpOrd C_NE = 1
+cmpOrd C_LT = 2
+cmpOrd C_GE = 3
+cmpOrd C_GT = 4
+cmpOrd C_LE = 5
 
 -- | JVM instruction set. For comments, see JVM specification.
 data Instruction =
@@ -205,3 +230,22 @@ derive instance genericInstruction :: Generic Instruction _
 
 instance showIstr :: Show Instruction where
   show instr = genericShow instr
+
+-- | JVM array type (primitive types)
+data ArrayType =
+    T_BOOLEAN  -- ^ 4
+  | T_CHAR     -- ^ 5
+  | T_FLOAT    -- ^ 6
+  | T_DOUBLE   -- ^ 7
+  | T_BYTE     -- ^ 8
+  | T_SHORT    -- ^ 9
+  | T_INT      -- ^ 10
+  | T_LONG     -- ^ 11
+  -- deriving (Eq, Show, Enum)
+
+derive instance eqArrayType :: Eq ArrayType
+
+derive instance genericArrayType :: Generic ArrayType _
+
+instance showArrayType :: Show ArrayType where
+  show = genericShow

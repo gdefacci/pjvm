@@ -7,7 +7,6 @@ import Data.Binary.Decoder (ByteLengthString(..))
 import Data.Binary.Types (Word16, Word32(..))
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
-import Data.List (fromFoldable)
 import Data.Tuple (Tuple)
 import Data.UInt (fromInt)
 
@@ -45,8 +44,6 @@ instance attributeBinary :: Binary Attribute where
     put attributeValue
 
   get = do
-    let getLen (ByteLengthString l _) = (Word32 $ fromInt l)
-        getStr (ByteLengthString _ s) = s
     attributeName <- get
     (ByteLengthString len attributeValue) <- get
     pure $
@@ -54,5 +51,3 @@ instance attributeBinary :: Binary Attribute where
 
 attributesList :: AttributesFile -> Array Attribute
 attributesList (AttributesFile attrs) = attrs
-
-

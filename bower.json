@@ -17,7 +17,8 @@
     "bower": "*",
     "install": "^1.0.4",
     "purescript-contravariant": "^4.0.0",
-    "purescript-unicode": "^4.0.1"
+    "purescript-unicode": "^4.0.1",
+    "purescript-node-fs-aff": "^6.0.0"
   },
   "devDependencies": {
     "purescript-quickcheck": "^5.0.0",

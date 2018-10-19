@@ -41,6 +41,8 @@ instance showConstant :: (Show b, Show f, Show m) => Show (Constant b f m) where
   show (CUTF8 s) = "UTF8 \"" <> show s <> "\""
   show (CUnicode s) = "Unicode \"" <> show s <> "\""
 
+derive instance eqConstant :: (Eq b, Eq f, Eq m) => Eq (Constant b f m)
+
 type ConstantDirect = Constant String FieldNameType MethodNameType
 
 type ConstantFile = Constant Word16 Word16 Word16

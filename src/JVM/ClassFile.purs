@@ -16,7 +16,7 @@ import Data.UInt (fromNumber, toInt)
 import JVM.Attributes (AttributesDirect, AttributesFile(..), attributesList)
 import JVM.ConstantPool (PoolDirect, PoolFile, getPool, putPool)
 import JVM.Flags (AccessFlag)
-import JVM.Members (Field(..), FieldDirect(..), FieldFile, MethodDirect)
+import JVM.Members (Field(..), FieldDirect(..), FieldFile, MethodDirect, MethodFile)
 
 -- | Generic .class file format
 data Class pool accessFlag b fld mthd attr = Class {
@@ -44,7 +44,17 @@ instance showClass :: (Show pool, Show accessFlag, Show b, Show fld, Show mthd, 
   show = genericShow
 
 newtype ClassDirect = ClassDirect (Class PoolDirect (S.Set AccessFlag) String FieldDirect MethodDirect AttributesDirect)
-newtype ClassFile = ClassFile (Class PoolFile Word16 Word16 FieldFile Word16 AttributesFile)
+newtype ClassFile = ClassFile (Class PoolFile Word16 Word16 FieldFile MethodFile AttributesFile)
+
+derive instance repGenericClassDirect :: Generic ClassDirect _
+derive instance eqClassDirect :: Eq ClassDirect
+instance showClassDirect :: Show ClassDirect where
+  show = genericShow
+
+derive instance repGenericClassFile :: Generic ClassFile _
+derive instance eqClassFile :: Eq ClassFile
+instance showClassFile :: Show ClassFile where
+  show = genericShow
 
 lookupField :: String -> ClassDirect -> Maybe (FieldDirect)
 lookupField name (ClassDirect(Class {classFields})) = look classFields

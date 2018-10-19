@@ -1,12 +1,16 @@
 module JVM.Flags where
 
 import Data.BitMask
-import Data.Eq (class Eq)
-import Data.Ord (class Ord)
+import Prelude
+
 import Data.Bounded (class Bounded)
 import Data.Enum (class Enum)
-import Test.QuickCheck.Arbitrary (class Arbitrary)
+import Data.Eq (class Eq)
+import Data.Generic.Rep (class Generic)
+import Data.Generic.Rep.Show (genericShow)
 import Data.NonEmpty (NonEmpty(..))
+import Data.Ord (class Ord)
+import Test.QuickCheck.Arbitrary (class Arbitrary)
 
 data AccessFlag =
   ACC_PUBLIC         -- 0x0001 Declared public; may be accessed from outside its package.
@@ -46,6 +50,10 @@ instance enumAccessFlag :: Enum AccessFlag where
 
 instance arbAccessFlag :: Arbitrary AccessFlag where
   arbitrary = arbitraryBitMask
+
+derive instance repGenericAccessFlag :: Generic AccessFlag _
+instance showAccessFlag :: Show AccessFlag where
+  show = genericShow
 
 data MethodAccessFlag =
   M_PUBLIC                       -- 0x0001 Declared public; may be accessed from outside its package.
@@ -94,6 +102,10 @@ instance enumMethodAccessFlag :: Enum MethodAccessFlag where
 instance arbMethodAccessFlag :: Arbitrary MethodAccessFlag where
   arbitrary = arbitraryBitMask
 
+derive instance repGenericMethodAccessFlag :: Generic MethodAccessFlag _
+instance showMethodAccessFlag :: Show MethodAccessFlag where
+  show = genericShow
+
 data FieldAccessFlag =
   F_PUBLIC                    -- 0x0001 Declared public; may be accessed from outside its package.
   | F_PRIVATE                 -- 0x0002 Declared private; usable only within the defining class.
@@ -133,3 +145,7 @@ instance enumFieldAccessFlag :: Enum FieldAccessFlag where
 
 instance arbFieldAccessFlag :: Arbitrary FieldAccessFlag where
   arbitrary = arbitraryBitMask
+
+derive instance repGenericFieldAccessFlag :: Generic FieldAccessFlag _
+instance showFieldAccessFlag :: Show FieldAccessFlag where
+  show = genericShow

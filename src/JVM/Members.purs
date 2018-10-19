@@ -17,7 +17,7 @@ import Data.Int (fromString)
 import Data.List.Lazy (replicateM)
 import Data.Map as M
 import Data.Maybe (Maybe(..))
-import Data.Newtype (class Newtype)
+import Data.Newtype (class Newtype, unwrap)
 import Data.Set as S
 import Data.String.CodeUnits (fromCharArray)
 import Data.Tuple (Tuple(..))
@@ -83,10 +83,20 @@ data FieldNameType = FieldNameType {
   ntSignature :: FieldType
 }
 
+derive instance repGenericFieldNameType :: Generic FieldNameType _
+derive instance eqFieldNameType :: Eq FieldNameType
+instance showFieldNameType :: Show FieldNameType where
+  show = genericShow
+
 data MethodNameType = MethodNameType {
   ntName :: String,
   ntSignature :: MethodSignature
 }
+
+derive instance repGenericMethodNameType :: Generic MethodNameType _
+derive instance eqMethodNameType :: Eq MethodNameType
+instance showMethodNameType :: Show MethodNameType where
+  show = genericShow
 
 data Field flgs b fld attrs = Field {
   fieldAccessFlags :: flgs,
@@ -104,6 +114,16 @@ instance showField :: (Show flgs, Show b, Show fld, Show attrs) => Show (Field f
 newtype FieldDirect = FieldDirect (Field (S.Set FieldAccessFlag) String FieldType AttributesDirect)
 newtype FieldFile = FieldFile (Field Word16 Word16 Word16 AttributesFile)
 
+derive instance repGenericFieldDirect :: Generic FieldDirect _
+derive instance eqFieldDirect :: Eq FieldDirect
+instance showFieldDirect :: Show FieldDirect where
+  show = genericShow
+
+derive instance repGenericFieldFile :: Generic FieldFile _
+derive instance eqFieldFile :: Eq FieldFile
+instance showFieldFile :: Show FieldFile where
+  show = genericShow
+
 derive instance newTypeFieldDirect :: Newtype FieldDirect _
 derive instance newTypeFieldFile :: Newtype FieldFile _
 
@@ -120,9 +140,18 @@ derive instance eqMethod :: (Eq flgs, Eq b, Eq fld, Eq attrs) => Eq (Method flgs
 instance showMethod :: (Show flgs, Show b, Show fld, Show attrs) => Show (Method flgs b fld attrs) where
   show = genericShow
 
-type MethodDirect = Method (S.Set MethodAccessFlag) String MethodSignature AttributesDirect
+newtype MethodDirect = MethodDirect (Method (S.Set MethodAccessFlag) String MethodSignature AttributesDirect)
+newtype MethodFile = MethodFile (Method Word16 Word16 Word16 AttributesFile)
 
-type MethodFile = Method Word16 Word16 Word16 AttributesFile
+derive instance repGenericMethodDirect :: Generic MethodDirect _
+derive instance eqMethodDirect :: Eq MethodDirect
+instance showMethodDirect :: Show MethodDirect where
+  show = genericShow
+
+derive instance repGenericMethodFile :: Generic MethodFile _
+derive instance eqMethodFile :: Eq MethodFile
+instance showMethodFile :: Show MethodFile where
+  show = genericShow
 
 -- | Size of attributes set at Direct stage
 arsize :: AttributesDirect -> Int
@@ -262,3 +291,24 @@ instance fieldFileBinary :: Binary FieldFile where
     fieldAttributes <- (A.fromFoldable >>> AttributesFile) <$> replicateM (toInt n) get
     pure $ FieldFile $
       Field {fieldAccessFlags, fieldName, fieldSignature, fieldAttributesCount, fieldAttributes}
+
+instance binaryMethodFile :: Binary MethodFile where
+  put (MethodFile (Method {methodAccessFlags, methodName, methodSignature, methodAttributesCount, methodAttributes})) = 
+    put methodAccessFlags <>
+    put methodName <>
+    put methodSignature <>
+    put methodAttributesCount <>
+    foldablePut (attributesList methodAttributes) 
+
+  get = do
+    methodAccessFlags <- get
+    methodName <- get
+    methodSignature <- get
+    methodAttributesCount <- get
+    methodAttributes <- (A.fromFoldable >>> AttributesFile) <$> replicateM (toInt $ unwrap methodAttributesCount) get
+    pure $ MethodFile $ Method {
+               methodAccessFlags,
+               methodName,
+               methodSignature,
+               methodAttributesCount,
+               methodAttributes }

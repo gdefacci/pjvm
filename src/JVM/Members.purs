@@ -177,7 +177,7 @@ instance binaryFieldType :: Binary FieldType where
              mbSize <- getInt
              sig <- get
              pure (Array (Just mbSize) sig)
-      _   -> fail (\offset -> GenericParserError { offset, message: "Unknown signature"})
+      _   -> fail $ \offset -> GenericParserError { offset, message: "Unknown signature"}
 
 instance binaryReturnSignature :: Binary ReturnSignature where
   put (Returns sig) = put sig
@@ -195,7 +195,7 @@ getInt :: Decoder Int
 getInt = do
     sds <- getDigits
     case fromString $ fromCharArray sds of
-      Nothing -> fail (\offset -> GenericParserError { offset, message: "Error parsing Int " <> fromCharArray sds} )
+      Nothing -> fail $ \offset -> GenericParserError { offset, message: "Error parsing Int " <> fromCharArray sds} 
       (Just n) -> pure n
 
   where
@@ -227,10 +227,10 @@ instance binaryMethodSignature :: Binary MethodSignature where
 
   get =  do
     x <- getChar8
-    when (x /= '(') $ fail (\offset -> GenericParserError { offset, message: "Cannot parse method signature: no starting `(' !" } )
+    when (x /= '(') $ fail $ \offset -> GenericParserError { offset, message: "Cannot parse method signature: no starting `(' !" } 
     args <- getArgs
     y <- getChar8
-    when (y /= ')') $ fail (\offset -> GenericParserError { offset, message: "Internal error: method signature without `)' !?" })
+    when (y /= ')') $ fail \offset -> GenericParserError { offset, message: "Internal error: method signature without `)' !?" }
     ret <- get
     pure $ MethodSignature args ret
 

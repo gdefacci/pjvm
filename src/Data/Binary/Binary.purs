@@ -2,7 +2,8 @@ module Data.Binary.Binary where
 
 import Prelude
 
-import Data.ArrayBuffer.Types (DataView, ByteOffset)
+import Data.Array (replicate)
+import Data.ArrayBuffer.Types (ByteOffset, DataView, ByteLength)
 import Data.Binary.Decoder (ByteLengthString(..), Decoder(..), getChar, getChar8, getFloat32, getFloat64, getString, getUInt16, getUInt32, getUInt8, getByteLengthString)
 import Data.Binary.Encoder (Encoder, putChar, putFloat32, putFloat64, putUInt16, putUInt32, putUInt8)
 import Data.Binary.Types (Float32(..), Float64(..), Word16(..), Word32(..), Word64(..), Word8(..))
@@ -11,13 +12,11 @@ import Data.Maybe (Maybe)
 import Data.Newtype (unwrap)
 import Data.String as STR
 import Data.String.CodeUnits (toCharArray)
-import Data.Tuple (Tuple(..))
+import Data.Tuple (Tuple(..), fst, snd)
 import Data.UInt (UInt, fromInt)
 import Effect (Effect)
 import Effect.Exception (throw)
 import Effect.Exception.Unsafe (unsafeThrow)
-
-import Data.Array (replicate)
 
 newtype Put = Put (DataView -> ByteOffset -> Effect Int)
 
@@ -92,11 +91,20 @@ instance binaryByteLengthString :: Binary ByteLengthString where
 
   get = getByteLengthString
 
+
+instance binaryTuple :: (Binary a, Binary b) => Binary (Tuple a b) where
+  put = (fst >>> put) <> (snd >>> put)
+
+  get = do
+    a <- get
+    b <- get
+    pure $ Tuple a b
+
 foldablePut :: forall f a. Foldable f => Binary a => f a -> Put
 foldablePut = foldMap put
 
-pad :: Word8 -> (ByteOffset -> ByteOffset) -> Put
-pad w f = Put $ \dv -> \ofs ->
+putPad :: forall a. Binary a => (ByteOffset -> ByteLength) -> a -> Put
+putPad f w = Put $ \dv -> \ofs ->
   let delta = f ofs
       (Put fp) = foldablePut (replicate (delta - 1) w)
   in fp dv ofs

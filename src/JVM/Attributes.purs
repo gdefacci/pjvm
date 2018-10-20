@@ -2,20 +2,21 @@ module JVM.Attributes where
 
 import Prelude
 
-import Data.Binary.Binary (class Binary, put, get)
-import Data.Binary.Decoder (ByteLengthString(..))
-import Data.Binary.Types (Word16, Word32(..))
+import Data.Binary.Binary (class Binary, foldablePut, get, put)
+import Data.Binary.Decoder (ByteLengthString(..), getRep)
+import Data.Binary.Types (Word16, Word32(..), Word8(..))
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
+import Data.Newtype (unwrap)
 import Data.Tuple (Tuple)
-import Data.UInt (fromInt)
+import Data.UInt (fromInt, toInt)
 
 -- | Any (class/ field/ method/ ...) attribute format.
 -- Some formats specify special formats for @attributeValue@.
 data Attribute = Attribute {
   attributeName :: Word16,
   attributeLength :: Word32,
-  attributeValue :: String
+  attributeValue :: Array Word8
 }
 
 derive instance repGenericAttribute :: Generic Attribute _
@@ -41,13 +42,14 @@ instance attributeBinary :: Binary Attribute where
   put (Attribute {attributeName, attributeLength, attributeValue}) =
     put attributeName <>
     put attributeLength <>
-    put attributeValue
+    foldablePut attributeValue
 
   get = do
     attributeName <- get
-    (ByteLengthString len attributeValue) <- get
+    attributeLength <- get
+    attributeValue <- getRep (toInt $ unwrap attributeLength) get
     pure $
-      Attribute { attributeName, attributeValue, attributeLength : Word32 $ fromInt len }
+      Attribute { attributeName, attributeValue, attributeLength }
 
 attributesList :: AttributesFile -> Array Attribute
 attributesList (AttributesFile attrs) = attrs

@@ -106,5 +106,5 @@ foldablePut = foldMap put
 putPad :: forall a. Binary a => (ByteOffset -> ByteLength) -> a -> Put
 putPad f w = Put $ \dv -> \ofs ->
   let delta = f ofs
-      (Put fp) = foldablePut (replicate (delta - 1) w)
+      (Put fp) = foldablePut (replicate delta w)
   in fp dv ofs

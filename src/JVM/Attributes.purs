@@ -2,7 +2,7 @@ module JVM.Attributes where
 
 import Prelude
 
-import Data.Binary.Binary (class Binary, foldablePut, get, put)
+import Data.Binary.Binary (class Binary, putFoldable, get, put)
 import Data.Binary.Decoder (ByteLengthString(..), getRep)
 import Data.Binary.Types (Word16, Word32(..), Word8(..))
 import Data.Generic.Rep (class Generic)
@@ -42,7 +42,7 @@ instance attributeBinary :: Binary Attribute where
   put (Attribute {attributeName, attributeLength, attributeValue}) =
     put attributeName <>
     put attributeLength <>
-    foldablePut attributeValue
+    putFoldable attributeValue
 
   get = do
     attributeName <- get

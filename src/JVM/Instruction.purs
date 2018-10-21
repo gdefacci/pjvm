@@ -3,7 +3,8 @@ module JVM.Instruction where
 import Data.Binary.Types
 import Prelude
 
-import Data.Binary.Binary (class Binary, Put(..), foldablePut, get, put, putFail, putPad)
+import Data.Binary.Binary (class Binary, putFoldable, get, put, putPad)
+import Data.Binary.Put (Put(..), putFail)
 import Data.Binary.Decoder (Decoder(..), ParserError(..), fail, getOffset, skip)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
@@ -29,7 +30,7 @@ derive instance genericIMM :: Generic IMM _
 instance showIMM :: Show IMM where
   show = genericShow
 
-immOrdValue :: IMM -> Int 
+immOrdValue :: IMM -> Int
 immOrdValue I0 = 0
 immOrdValue I1 = 1
 immOrdValue I2 = 2
@@ -68,12 +69,12 @@ cmpOrd C_GT = 4
 cmpOrd C_LE = 5
 
 toCmp :: Int -> Maybe CMP
-toCmp 0 = Just C_EQ 
-toCmp 1 = Just C_NE 
-toCmp 2 = Just C_LT 
-toCmp 3 = Just C_GE 
-toCmp 4 = Just C_GT 
-toCmp 5 = Just C_LE 
+toCmp 0 = Just C_EQ
+toCmp 1 = Just C_NE
+toCmp 2 = Just C_LT
+toCmp 3 = Just C_GE
+toCmp 4 = Just C_GT
+toCmp 5 = Just C_LE
 toCmp _ = Nothing
 
 
@@ -269,10 +270,10 @@ imm :: Int                   -- ^ Base opcode
     -> (IMM -> Instruction)    -- ^ Instruction constructor
     -> Int                   -- ^ Opcode to parse
     -> Decoder Instruction
-imm base constr x = 
+imm base constr x =
   let immValue = x - base
   in case toIMMEnum immValue of
-    Nothing -> fail $ \offset -> GenericParserError { offset, message: "Unknown IMM byte: " <> show immValue} 
+    Nothing -> fail $ \offset -> GenericParserError { offset, message: "Unknown IMM byte: " <> show immValue}
     (Just r) -> pure $ constr r
   -- pure $ constr $ toEnum $ fromIntegral (x-base)
 
@@ -293,7 +294,7 @@ atype2byte T_INT      = Word8 $ fromInt 10
 atype2byte T_LONG     = Word8 $ fromInt 11
 
 byte2atype :: Word8 -> Maybe ArrayType
-byte2atype (Word8 n) = 
+byte2atype (Word8 n) =
   case toInt n of
     4  -> pure T_BOOLEAN
     5  -> pure T_CHAR
@@ -312,7 +313,7 @@ instance binaryArrayType :: Binary ArrayType where
   get = do
     x <- get
     case byte2atype x of
-      Nothing -> fail $ \offset -> GenericParserError { offset, message: "Unknown array type byte: " <> show x} 
+      Nothing -> fail $ \offset -> GenericParserError { offset, message: "Unknown array type byte: " <> show x}
       (Just r) -> pure r
 
   put t = put (atype2byte t)
@@ -322,17 +323,17 @@ put1 :: forall a. (Binary a)
       => Int                    -- ^ Opcode
       -> a                      -- ^ First argument
       -> Put
-put1 code x = 
+put1 code x =
   put (Word8 $ fromInt code) <>
   put x
 
-put2 :: forall a b. Binary a 
-      => Binary b 
+put2 :: forall a b. Binary a
+      => Binary b
       => Int                      -- ^ Opcode
       -> a                        -- ^ First argument
       -> b                        -- ^ Second argument
       -> Put
-put2 code x y = 
+put2 code x y =
   put (Word8 $ fromInt code) <>
   put x <>
   put y
@@ -473,18 +474,18 @@ instance binaryInstruction :: Binary Instruction where
   put (GOTO x)        = put1 167 x
   put (JSR x)         = put1 168 x
   put  RET            = put $ Word8 $ fromInt 169
-  put (TABLESWITCH _ def low high offs) = 
+  put (TABLESWITCH _ def low high offs) =
                                    put (Word8 $ fromInt 170) <>
                                    putPad padding (Word8 $ fromInt 0) <>
                                    put low <>
                                    put high <>
-                                   foldablePut offs
-  put (LOOKUPSWITCH _ def n pairs) = 
+                                   putFoldable offs
+  put (LOOKUPSWITCH _ def n pairs) =
                                    put (Word8 $ fromInt 171) <>
                                    putPad padding (Word8 $ fromInt 0) <>
-                                   put def <> 
-                                   put n <> 
-                                   foldablePut pairs 
+                                   put def <>
+                                   put n <>
+                                   putFoldable pairs
 
   put  IRETURN        = put $ Word8 $ fromInt 172
   put  LRETURN        = put $ Word8 $ fromInt 173
@@ -499,9 +500,9 @@ instance binaryInstruction :: Binary Instruction where
   put (INVOKEVIRTUAL x)     = put1 182 x
   put (INVOKESPECIAL x)     = put1 183 x
   put (INVOKESTATIC x)      = put1 184 x
-  put (INVOKEINTERFACE x c) = put2 185 x c <> 
+  put (INVOKEINTERFACE x c) = put2 185 x c <>
                               put (Word8 $ fromInt 0)
-                              
+
   put (NEW x)         = put1 187 x
   put (NEWARRAY x)    = put1 188 x
   put (ANEWARRAY x)   = put1 189 x
@@ -696,7 +697,7 @@ instance binaryInstruction :: Binary Instruction where
         | inRange 34 37 c -> imm 34 FLOAD_ c
         | inRange 38 41 c -> imm 38 DLOAD_ c
         | inRange 42 45 c -> imm 42 ALOAD_ c
-        | inRange 15 15 c -> 
+        | inRange 15 15 c ->
           case toCmp (c-153) of
             Nothing -> fail $ \offset -> GenericParserError { offset, message: "Unknown instruction byte code: " <> show c}
             (Just cmp) -> IF cmp <$> get

@@ -2,52 +2,33 @@ module Data.Binary.Binary where
 
 import Prelude
 
-import Data.Array (replicate)
-import Data.ArrayBuffer.Types (ByteOffset, DataView, ByteLength)
-import Data.Binary.Decoder (ByteLengthString(..), Decoder(..), getChar, getChar8, getFloat32, getFloat64, getString, getUInt16, getUInt32, getUInt8, getByteLengthString)
-import Data.Binary.Encoder (Encoder, putChar, putFloat32, putFloat64, putUInt16, putUInt32, putUInt8)
+import Data.ArrayBuffer.Types (ByteLength, ByteOffset)
+import Data.Binary.Decoder (ByteLengthString(..), Decoder, getByteLengthString, getChar, getFloat32, getFloat64, getString, getUInt16, getUInt32, getUInt8)
+import Data.Binary.Encoder (putFloat32, putFloat64, putUInt16, putUInt32, putUInt8)
+import Data.Binary.Put (Put, charPut, fromEncoder, putFail, putN)
 import Data.Binary.Types (Float32(..), Float64(..), Word16(..), Word32(..), Word64(..), Word8(..))
 import Data.Foldable (class Foldable, foldMap)
-import Data.Maybe (Maybe)
+import Data.Maybe (Maybe(..))
 import Data.Newtype (unwrap)
 import Data.String as STR
 import Data.String.CodeUnits (toCharArray)
 import Data.Tuple (Tuple(..), fst, snd)
-import Data.UInt (UInt, fromInt)
-import Effect (Effect)
-import Effect.Exception (throw)
-import Effect.Exception.Unsafe (unsafeThrow)
-
-newtype Put = Put (DataView -> ByteOffset -> Effect Int)
-
-instance semigroupPut :: Semigroup Put where
-  append (Put f1) (Put f2) = Put $ \dv -> \ofs -> do
-    ofs1 <- f1 dv ofs
-    f2 dv ofs1
-
-instance monoidPut :: Monoid Put where
-  mempty = Put $ \_ -> \ofs -> pure ofs
-
-putFail :: (ByteOffset -> String) -> Put
-putFail msg = Put $ \_ -> \ofs -> throw $ msg ofs
+import Data.UInt (fromInt)
 
 class Binary a where
   put :: a -> Put
   get :: Decoder a
 
-fromEncoder :: forall a. Encoder a -> a -> Put
-fromEncoder f a = Put (f a)
-
 instance binaryWord8 :: Binary Word8 where
-  put = unwrap >>> (fromEncoder putUInt8)
+  put = unwrap >>> (fromEncoder 1 putUInt8)
   get = Word8 <$> getUInt8
 
 instance binaryWord16 :: Binary Word16 where
-  put = unwrap >>> (fromEncoder putUInt16)
+  put = unwrap >>> (fromEncoder 2 putUInt16)
   get = Word16 <$> getUInt16
 
 instance binaryWord32 :: Binary Word32 where
-  put = unwrap >>> (fromEncoder putUInt32)
+  put = unwrap >>> (fromEncoder 4 putUInt32)
   get = Word32 <$> getUInt32
 
 instance binaryWord64 :: Binary Word64 where
@@ -63,28 +44,28 @@ instance binaryWord64 :: Binary Word64 where
     pure $ Word64 w32a w32b
 
 instance binaryFloat32 :: Binary Float32 where
-  put = unwrap >>> (fromEncoder putFloat32)
+  put = unwrap >>> (fromEncoder 4 putFloat32)
   get = Float32 <$> getFloat32
 
 instance binaryFloat64 :: Binary Float64 where
-  put = unwrap >>> (fromEncoder putFloat64)
+  put = unwrap >>> (fromEncoder 8 putFloat64)
   get = Float64 <$> getFloat64
 
 instance binaryChar :: Binary Char where
-  put = (fromEncoder putChar)
+  put = charPut
   get = getChar
 
 instance binaryString :: Binary String where
   put =
     (STR.length >>> fromInt >>> Word16 >>> put) <>
-    (toCharArray >>> foldablePut)
+    (toCharArray >>> putFoldable)
 
   get = getString
 
 instance binaryByteLengthString :: Binary ByteLengthString where
   put =
     (getLen >>> fromInt >>> Word16 >>> put) <>
-    (getStr >>> toCharArray >>> foldablePut)
+    (getStr >>> toCharArray >>> putFoldable)
     where
       getLen (ByteLengthString l _) = l
       getStr (ByteLengthString _ s) = s
@@ -100,11 +81,8 @@ instance binaryTuple :: (Binary a, Binary b) => Binary (Tuple a b) where
     b <- get
     pure $ Tuple a b
 
-foldablePut :: forall f a. Foldable f => Binary a => f a -> Put
-foldablePut = foldMap put
+putFoldable :: forall f a. Foldable f => Binary a => f a -> Put
+putFoldable = foldMap put
 
 putPad :: forall a. Binary a => (ByteOffset -> ByteLength) -> a -> Put
-putPad f w = Put $ \dv -> \ofs ->
-  let delta = f ofs
-      (Put fp) = foldablePut (replicate delta w)
-  in fp dv ofs
+putPad = putN put

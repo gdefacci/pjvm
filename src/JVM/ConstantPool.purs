@@ -4,7 +4,8 @@ import Prelude
 
 import Control.Monad.State as ST
 import Data.Array as A
-import Data.Binary.Binary (Put, get, put)
+import Data.Binary.Binary (get, put)
+import Data.Binary.Put (Put)
 import Data.Binary.Decoder (Decoder, ParserError(..), fail)
 import Data.Binary.Types (Float32(..), Float64(..), Word16(..), Word32(..), Word64(..), Word8(..))
 import Data.Foldable (foldMap)

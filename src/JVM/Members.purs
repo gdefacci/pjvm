@@ -3,9 +3,9 @@ module JVM.Members where
 import Prelude
 
 import Data.Array as A
-import Data.Binary.Binary (class Binary, Put, foldablePut, get, put)
+import Data.Binary.Binary (class Binary, putFoldable, get, put)
+import Data.Binary.Put (Put(..))
 import Data.Binary.Decoder (Decoder(..), ParserError(..), fail, getChar8, getUInt8, lookAhead, skip)
-import Data.Binary.Encoder (putFoldable)
 import Data.Binary.Types (Word16(..), Word32(..))
 import Data.Char (fromCharCode, toCharCode)
 import Data.Char as CH
@@ -224,7 +224,7 @@ getInt :: Decoder Int
 getInt = do
     sds <- getDigits
     case fromString $ fromCharArray sds of
-      Nothing -> fail $ \offset -> GenericParserError { offset, message: "Error parsing Int " <> fromCharArray sds} 
+      Nothing -> fail $ \offset -> GenericParserError { offset, message: "Error parsing Int " <> fromCharArray sds}
       (Just n) -> pure n
 
   where
@@ -250,13 +250,13 @@ getToSemicolon = do
 instance binaryMethodSignature :: Binary MethodSignature where
   put (MethodSignature args ret) =
     put '(' <>
-    foldablePut args <>
+    putFoldable args <>
     put ')' <>
     put ret
 
   get =  do
     x <- getChar8
-    when (x /= '(') $ fail $ \offset -> GenericParserError { offset, message: "Cannot parse method signature: no starting `(' !" } 
+    when (x /= '(') $ fail $ \offset -> GenericParserError { offset, message: "Cannot parse method signature: no starting `(' !" }
     args <- getArgs
     y <- getChar8
     when (y /= ')') $ fail \offset -> GenericParserError { offset, message: "Internal error: method signature without `)' !?" }
@@ -281,7 +281,7 @@ instance fieldFileBinary :: Binary FieldFile where
     put fieldName <>
     put fieldSignature <>
     put fieldAttributesCount <>
-    foldablePut (attributesList fieldAttributes)
+    putFoldable (attributesList fieldAttributes)
 
   get = do
     fieldAccessFlags <- get
@@ -293,12 +293,12 @@ instance fieldFileBinary :: Binary FieldFile where
       Field {fieldAccessFlags, fieldName, fieldSignature, fieldAttributesCount, fieldAttributes}
 
 instance binaryMethodFile :: Binary MethodFile where
-  put (MethodFile (Method {methodAccessFlags, methodName, methodSignature, methodAttributesCount, methodAttributes})) = 
+  put (MethodFile (Method {methodAccessFlags, methodName, methodSignature, methodAttributesCount, methodAttributes})) =
     put methodAccessFlags <>
     put methodName <>
     put methodSignature <>
     put methodAttributesCount <>
-    foldablePut (attributesList methodAttributes) 
+    putFoldable (attributesList methodAttributes)
 
   get = do
     methodAccessFlags <- get

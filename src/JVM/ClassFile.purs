@@ -3,7 +3,7 @@ module JVM.ClassFile where
 import Prelude
 
 import Data.Array as A
-import Data.Binary.Binary (class Binary, foldablePut, put, get)
+import Data.Binary.Binary (class Binary, putFoldable, put, get)
 import Data.Binary.Decoder (ParserError(..), fail)
 import Data.Binary.Types (Word16(..), Word32(..))
 import Data.Generic.Rep (class Generic)
@@ -78,22 +78,22 @@ instance binaryClassFile :: Binary ClassFile where
     put thisClass <>
     put superClass <>
     put interfacesCount <>
-    foldablePut interfaces <>
+    putFoldable interfaces <>
     put classFieldsCount <>
-    foldablePut classFields <>
+    putFoldable classFields <>
     put classMethodsCount <>
-    foldablePut classMethods <>
+    putFoldable classMethods <>
     put classAttributesCount <>
-    foldablePut (attributesList classAttributes)
+    putFoldable (attributesList classAttributes)
 
   get = do
     let xCAFEBABE = Word32 $ fromNumber 3405691582.0
     magic <- get
-    when (magic /= xCAFEBABE) $ 
+    when (magic /= xCAFEBABE) $
       fail (\offset -> GenericParserError { offset, message: "Invalid .class file MAGIC value: " <> show magic })
     minorVersion <- get
     majorVersion <- get
-    when ((toInt $ unwrap majorVersion) > 50) $ 
+    when ((toInt $ unwrap majorVersion) > 50) $
       fail (\offset -> GenericParserError { offset, message: "Too new .class file format: " <> show majorVersion })
     constsPoolSize <- get
     constsPool <- getPool ((toInt $ unwrap $ constsPoolSize) - 1)

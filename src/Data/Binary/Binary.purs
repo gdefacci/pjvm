@@ -2,13 +2,13 @@ module Data.Binary.Binary where
 
 import Prelude
 
+import Data.ArrayBuffer.DataView (setFloat32be, setFloat64be, setUint16be, setUint32be, setUint8)
 import Data.ArrayBuffer.Types (ByteLength, ByteOffset)
 import Data.Binary.Decoder (ByteLengthString(..), Decoder, getByteLengthString, getChar, getFloat32, getFloat64, getString, getUInt16, getUInt32, getUInt8)
-import Data.Binary.Encoder (putFloat32, putFloat64, putUInt16, putUInt32, putUInt8)
-import Data.Binary.Put (Put, charPut, fromEncoder, putFail, putN)
+import Data.Binary.Put (Put, charPut, fromSetter, putN, uint8Put)
 import Data.Binary.Types (Float32(..), Float64(..), Word16(..), Word32(..), Word64(..), Word8(..))
 import Data.Foldable (class Foldable, foldMap)
-import Data.Maybe (Maybe(..))
+
 import Data.Newtype (unwrap)
 import Data.String as STR
 import Data.String.CodeUnits (toCharArray)
@@ -20,15 +20,15 @@ class Binary a where
   get :: Decoder a
 
 instance binaryWord8 :: Binary Word8 where
-  put = unwrap >>> (fromEncoder 1 putUInt8)
+  put = unwrap >>> uint8Put
   get = Word8 <$> getUInt8
 
 instance binaryWord16 :: Binary Word16 where
-  put = unwrap >>> (fromEncoder 2 putUInt16)
+  put = unwrap >>> (fromSetter 2 setUint16be)
   get = Word16 <$> getUInt16
 
 instance binaryWord32 :: Binary Word32 where
-  put = unwrap >>> (fromEncoder 4 putUInt32)
+  put = unwrap >>> (fromSetter 4 setUint32be)
   get = Word32 <$> getUInt32
 
 instance binaryWord64 :: Binary Word64 where
@@ -44,11 +44,11 @@ instance binaryWord64 :: Binary Word64 where
     pure $ Word64 w32a w32b
 
 instance binaryFloat32 :: Binary Float32 where
-  put = unwrap >>> (fromEncoder 4 putFloat32)
+  put = unwrap >>> (fromSetter 4 setFloat32be)
   get = Float32 <$> getFloat32
 
 instance binaryFloat64 :: Binary Float64 where
-  put = unwrap >>> (fromEncoder 8 putFloat64)
+  put = unwrap >>> (fromSetter 8 setFloat64be)
   get = Float64 <$> getFloat64
 
 instance binaryChar :: Binary Char where

@@ -1,21 +1,18 @@
-module Data.Binary.Put (Put, charPut, fromEncoder, putN, putFail, runPut) where
+module Data.Binary.Put (Put, charPut, fromSetter, putN, putFail, runPut, uint8Put) where
 
 import Prelude
 
-import Data.Array (foldMap, length)
+import Data.Array (fold)
 import Data.ArrayBuffer.ArrayBuffer (create)
-import Data.ArrayBuffer.DataView (whole)
+import Data.ArrayBuffer.DataView (Setter, setUint8, whole)
 import Data.ArrayBuffer.Types (ArrayBuffer, ByteOffset, DataView)
-import Data.Binary.Encoder (Encoder, putUInt8)
-import Data.Binary.Types (Word8(..))
 import Data.Char (toCharCode)
-import Data.Foldable (sum)
 import Data.Function (applyN)
+import Data.Int.Bits (shr, (.&.), (.|.))
 import Data.Maybe (Maybe(..))
-import Data.UInt (fromInt)
+import Data.UInt (UInt, fromInt)
 import Effect (Effect)
 import Effect.Exception (throw)
-import Data.Int.Bits (shr, (.&.), (.|.))
 
 newtype Put = Put ( ByteOffset -> { newOffset::Int,  effect::DataView -> Effect Unit } )
 
@@ -29,8 +26,8 @@ instance semigroupPut :: Semigroup Put where
 instance monoidPut :: Monoid Put where
   mempty = Put $ \ofst -> { newOffset : ofst, effect : \_ -> pure unit }
 
-fromEncoder :: forall a. Int -> Encoder a -> a -> Put
-fromEncoder sz f a = Put $ \ofst -> { newOffset : ofst + sz, effect : f a ofst }
+fromSetter :: forall a. Int -> Setter a -> a -> Put
+fromSetter sz setter a = Put $ \ofst -> { newOffset : ofst + sz, effect : \dv -> setter dv a ofst }
 
 putFail :: (ByteOffset -> String) -> Put
 putFail msg = Put $ \ofst -> { newOffset : ofst + 0, effect : \_ -> throw $ msg ofst }
@@ -80,11 +77,13 @@ charBytes ch =
               x80 .|. (x3f .&. c) ]
     _ -> Nothing
 
+uint8Put :: UInt -> Put
+uint8Put = fromSetter 1 setUint8
+
 charPut :: Char -> Put
 charPut ch =
   case charBytes ch of
     Nothing -> putFail $ \ofst -> "Cant convert char " <> (show ch) <> " to modified UTF-8, offset" <> (show ofst)
-    (Just cbs) ->
-      foldMap identity $ (fromInt >>> (fromEncoder 1 putUInt8)) <$> cbs
+    (Just cbs) -> fold $ (fromInt >>> uint8Put) <$> cbs
 
 

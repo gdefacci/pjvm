@@ -5,14 +5,14 @@ import Prelude
 import Control.Monad.State as ST
 import Data.Array as A
 import Data.Binary.Binary (get, put)
-import Data.Binary.Put (Put)
 import Data.Binary.Decoder (Decoder, ParserError(..), fail)
-import Data.Binary.Types (Float32(..), Float64(..), Word16(..), Word32(..), Word64(..), Word8(..))
+import Data.Binary.Put (Put)
+import Data.Binary.Types (Float32, Float64, Word16(..), Word32, Word64, Word8(..))
 import Data.Foldable (foldMap)
 import Data.Map as M
 import Data.Tuple (Tuple(..))
 import Data.UInt (fromInt, toInt)
-import JVM.Members (FieldNameType(..), MethodNameType(..))
+import JVM.Members (FieldNameType, MethodNameType)
 
 data Constant b f m =
     CClass b
@@ -82,12 +82,11 @@ putPool pool =
                      put (Word8 $ fromInt 2) <>
                      put getString
 
-getPool :: Int -> Decoder (PoolFile)
+getPool :: Int -> Decoder PoolFile
 getPool n = do
     items <- ST.evalStateT go (Word16 $ fromInt 1)
     pure $ M.fromFoldable items
   where
-    go :: ST.StateT Word16 Decoder (Array (Tuple Word16 ConstantFile))
     go = do
       (Word16 i) <- ST.get
       if i > (fromInt n)
@@ -101,8 +100,8 @@ getPool n = do
           next <- go
           pure $ A.cons (Tuple i' c) next
 
+    getC :: Decoder ConstantFile
     getC = do
-      -- !offset <- bytesRead
       (Word8 utag) <- get
       let tag = toInt utag
       case tag of
@@ -122,4 +121,4 @@ getPool n = do
         10 -> CMethod       <$> get <*> get
         11 -> CIfaceMethod  <$> get <*> get
         12 -> CNameType     <$> get <*> get
-        _  -> fail (\offset -> GenericParserError { offset, message: "Unknown constants pool entry tag: " <> show tag})
+        _  -> fail $ \offset -> GenericParserError { offset, message: "Unknown constants pool entry tag: " <> show tag}

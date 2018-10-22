@@ -2,9 +2,13 @@ module Data.Binary.Decoder where
 
 import Prelude
 
+import Control.Monad.Error.Class (class MonadThrow, throwError)
+import Control.Monad.Except (ExceptT, runExceptT)
+import Control.Monad.State (State, runState)
+import Control.Monad.State as ST
 import Data.Array as A
 import Data.ArrayBuffer.DataView as DV
-import Data.ArrayBuffer.Types (ArrayBuffer, DataView, ByteOffset)
+import Data.ArrayBuffer.Types (ArrayBuffer, ByteOffset, DataView)
 import Data.Char (fromCharCode)
 import Data.Char as CH
 import Data.Either (Either(..))
@@ -24,106 +28,118 @@ data ParserError =  NotEnoughBytes { offset::Int, required::Int, avaiable::Int}
                     | InputPartiallyParsed { offset::Int }
                     | GenericParserError { offset::Int, message::String }
 
+type ParserState =
+  { dataview :: DataView
+  , offset :: ByteOffset
+  }
+
 derive instance genericParserError :: Generic ParserError _
 instance showParserError :: Show ParserError where
   show = genericShow
 
-newtype Decoder a = Decoder (DataView -> ByteOffset -> Either ParserError (Tuple Int a))
+type Decoder a = ExceptT ParserError (State ParserState) a
 
-decodeBuffer :: forall a. Decoder a -> ArrayBuffer -> Effect (Tuple Int a)
+decodeBuffer :: forall a err. Show err => ExceptT err (State ParserState) a -> ArrayBuffer -> Effect (Tuple ByteOffset a)
 decodeBuffer decoder buf =
-  case runDecoder decoder (DV.whole buf) 0 of
+  let (Tuple r {offset}) = runDecoder decoder 0 (DV.whole buf)
+  in case r of
     (Left err) -> throw (show err)
-    (Right v) -> pure $ v
+    (Right v) -> pure $ Tuple offset v
 
-decodeFull :: forall a. Decoder a -> ArrayBuffer -> Effect a
+decodeFull :: forall a. ExceptT ParserError (State ParserState) a -> ArrayBuffer -> Effect a
 decodeFull decoder arr = snd <$> (decodeBuffer (consumeAllInput decoder) arr)
 
-runDecoder :: forall a. Decoder a -> DataView -> ByteOffset -> Either ParserError (Tuple Int a)
-runDecoder (Decoder dec) dv ofs = dec dv ofs
+runDecoder :: forall a err. ExceptT err (State ParserState) a
+                            -> ByteOffset
+                            -> DataView
+                            -> Tuple (Either err a) ParserState
+runDecoder dec offset dataview = runState (runExceptT dec) {offset, dataview}
 
-derive instance decoderFunctor :: Functor Decoder
+getOffset :: forall m. ST.MonadState ParserState m  => m ByteOffset
+getOffset = do
+  {offset} <- ST.get
+  pure offset
 
-instance decoderApply :: Apply Decoder where
-  apply ff fa = do
-    f <- ff
-    a <- fa
-    pure $ f a
+getDataView :: forall m. ST.MonadState ParserState m  => m DataView
+getDataView = do
+  {dataview} <- ST.get
+  pure dataview
 
-instance decoderApplicative :: Applicative Decoder where
-  pure a = Decoder $ \_ -> \ofs -> pure $ (Tuple ofs a)
+fail :: forall a m. MonadThrow ParserError m
+                    => ST.MonadState ParserState m
+                    => (ByteOffset -> ParserError)
+                    -> m a
+fail err = do
+  ofs <- getOffset
+  throwError $ err ofs
 
-instance decoderBind :: Bind Decoder where
-  bind (Decoder fa) f =
-    Decoder $ \dv -> \ofs -> do
-      (Tuple ofst1 a) <- fa dv ofs
-      let (Decoder getter') = f a
-      getter' dv ofst1
+setOffset :: forall m. ST.MonadState ParserState m => ByteOffset -> m Unit
+setOffset offset = do
+  dataview <- getDataView
+  ST.put {offset, dataview}
 
-instance decoderMonad :: Monad Decoder
+setDataView :: forall m. ST.MonadState ParserState m => DataView -> m Unit
+setDataView dataview = do
+  offset <- getOffset
+  ST.put {dataview, offset}
 
-fail :: forall a. (ByteOffset -> ParserError) -> Decoder a
-fail err = Decoder $ \_ -> \ofst -> Left $ err ofst
+getDataViewByteLenght :: forall m. ST.MonadState ParserState m => m Int
+getDataViewByteLenght = DV.byteLength <$> getDataView
 
-getOffset :: Decoder ByteOffset
-getOffset = Decoder $ \_ -> \ofs -> pure $ Tuple ofs ofs
-
-setOffset :: ByteOffset -> Decoder Unit
-setOffset ofs = Decoder $ \_ -> \_ -> pure $ Tuple ofs unit
-
-getDataViewByteLenght :: Decoder Int
-getDataViewByteLenght = Decoder $ \dv -> \ofs -> pure $ Tuple ofs (DV.byteLength dv)
-
-getRemainingBytesLength :: Decoder Int
-getRemainingBytesLength = do
+hasMoreBytes :: forall m. ST.MonadState ParserState m => m Boolean
+hasMoreBytes = do
   ofs <- getOffset
   tot <- getDataViewByteLenght
-  pure $ tot - ofs
+  pure $ (tot - ofs) > 0
 
-hasMoreBytes :: Decoder Boolean
-hasMoreBytes = do
-  rb <- getRemainingBytesLength
-  pure $ rb > 0
-
-lookAhead :: forall a. Decoder a -> Decoder a
+lookAhead :: forall a m. ST.MonadState ParserState m =>  m a -> m a
 lookAhead decoder = do
   ofs <- getOffset
   r <- decoder
   setOffset ofs
   pure $ r
 
-withSlice :: forall a. Int -> Decoder a -> Decoder a
-withSlice sliceLength (Decoder decoder) =
-  Decoder $ \dv -> \ofs ->
-    case DV.slice ofs sliceLength (DV.buffer dv) of
-      Nothing -> Left $ NotEnoughBytes { offset: ofs, avaiable: ((DV.byteLength dv) - ofs), required: sliceLength }
-      (Just sliceDv) -> do
-        (Tuple len r) <- decoder sliceDv 0
-        pure $ Tuple (ofs + len) r
+withSlice :: forall a m. ST.MonadState ParserState m => MonadThrow ParserError m => Int -> m a -> m a
+withSlice sliceLength decoder = do
+  {offset:ofs, dataview:dv} <- ST.get
+  case DV.slice ofs sliceLength (DV.buffer dv) of
+    Nothing -> throwError $ NotEnoughBytes { offset: ofs, avaiable: ((DV.byteLength dv) - ofs), required: sliceLength }
+    (Just sliceDV) -> do
+      setDataView sliceDV
+      setOffset 0
+      r <- decoder
+      ST.put {offset : ofs + sliceLength, dataview : dv}
+      pure $ r
 
-sized :: forall a. Int -> DV.Getter a -> Decoder a
-sized n f = Decoder $ \dv -> \ofs ->
-  toResult n dv ofs (unsafePerformEffect $ f dv ofs)
-  where
-    toResult required dv offset Nothing = Left $ NotEnoughBytes { offset, avaiable: ((DV.byteLength dv) - offset), required }
-    toResult _ _  ofs (Just v) = Right $ Tuple (ofs+n) v
+sized :: forall a m. ST.MonadState ParserState m
+                      => MonadThrow ParserError m
+                      => Int
+                      -> DV.Getter a
+                      -> m a
+sized n f = do
+  {offset:ofs, dataview:dv} <- ST.get
+  case unsafePerformEffect $ f dv ofs of
+    Nothing -> throwError $ NotEnoughBytes { offset:ofs, avaiable: ((DV.byteLength dv) - ofs), required:n }
+    (Just v) -> do
+      setOffset $ ofs + n
+      pure v
 
-getUInt8 :: Decoder UInt
+getUInt8 :: forall m. ST.MonadState ParserState m => MonadThrow ParserError m => m UInt
 getUInt8 = sized 1 $ DV.getUint8
 
-getUInt16 :: Decoder UInt
+getUInt16 :: forall m. ST.MonadState ParserState m => MonadThrow ParserError m => m UInt
 getUInt16 = sized 2 $ DV.getUint16be
 
-getUInt32 :: Decoder UInt
+getUInt32 :: forall m. ST.MonadState ParserState m => MonadThrow ParserError m => m UInt
 getUInt32 = sized 4 $ DV.getUint32be
 
-getFloat32 :: Decoder Number
+getFloat32 :: forall m. ST.MonadState ParserState m => MonadThrow ParserError m => m Number
 getFloat32 = sized 4 $ DV.getFloat32be
 
-getFloat64 :: Decoder Number
+getFloat64 :: forall m. ST.MonadState ParserState m => MonadThrow ParserError m => m Number
 getFloat64 = sized 8 $ DV.getFloat64be
 
-getRest :: forall a. Decoder a -> Decoder (Array a)
+getRest :: forall a m. ST.MonadState ParserState m => MonadThrow ParserError m => m a -> m (Array a)
 getRest decoder = do
   more <- hasMoreBytes
   if more
@@ -134,7 +150,7 @@ getRest decoder = do
     else
       pure []
 
-consumeAllInput :: forall a. Decoder a -> Decoder a
+consumeAllInput :: forall a m. ST.MonadState ParserState m => MonadThrow ParserError m => m a -> m a
 consumeAllInput decoder = do
   res <- decoder
   more <- hasMoreBytes
@@ -142,36 +158,36 @@ consumeAllInput decoder = do
     then fail $ \offset -> InputPartiallyParsed {offset}
     else pure res
 
-getString :: Decoder String
+getString :: forall m. ST.MonadState ParserState m => MonadThrow ParserError m => m String
 getString = (\(ByteLengthString _ txt) -> txt) <$> getByteLengthString
 
 data ByteLengthString = ByteLengthString Int String
 
-getByteLengthString :: Decoder ByteLengthString
+getByteLengthString :: forall m. ST.MonadState ParserState m => MonadThrow ParserError m => m ByteLengthString
 getByteLengthString = do
   len <- toInt <$> getUInt16
   (ByteLengthString len) <$> fromCharArray <$> (withSlice len $ getRest getChar)
 
-getChar8 :: Decoder Char
+getChar8 :: forall m. ST.MonadState ParserState m => MonadThrow ParserError m => m Char
 getChar8 = do
   x <- getUInt8
   case CH.fromCharCode (toInt x) of
     Nothing -> fail $ \offset -> UnrecognizedChar { offset, charCode: x }
     (Just ch) -> pure ch
 
-getRep :: forall a. Int -> Decoder a -> Decoder (Array a)
+getRep :: forall a m. ST.MonadState ParserState m => MonadThrow ParserError m => Int -> m a -> m (Array a)
 getRep 0 _ = pure []
 getRep n decoder = do
   r1 <- decoder
   rest <- getRep (n - 1) decoder
   pure $ A.cons r1 rest
 
-skip :: Int -> Decoder Unit
+skip ::  forall m. ST.MonadState ParserState m => MonadThrow ParserError m => Int -> m Unit
 skip n = do
   ofs <- getOffset
   setOffset $ ofs + n
 
-getChar :: Decoder Char
+getChar :: forall m. ST.MonadState ParserState m => MonadThrow ParserError m => m Char
 getChar =
   let x0f     = 15
       x1f     = 31

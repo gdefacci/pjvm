@@ -1,20 +1,20 @@
 module JVM.Instruction where
 
-import Data.Binary.Types
 import Prelude
 
+import Data.Binary.Types (Word16, Word32, Word8(..))
+
+import Data.Array as A
 import Data.Binary.Binary (class Binary, putFoldable, get, put, putPad)
-import Data.Binary.Put (Put(..), putFail)
-import Data.Binary.Decoder (Decoder(..), ParserError(..), fail, getOffset, skip)
+import Data.Binary.Decoder (Decoder, ParserError(..), fail, getOffset, skip)
+import Data.Binary.Put (Put, putFail)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.List.Lazy (replicateM)
 import Data.Maybe (Maybe(..))
 import Data.Newtype (unwrap)
-import Data.Tuple (Tuple(..))
+import Data.Tuple (Tuple)
 import Data.UInt (fromInt, toInt)
-
-import Data.Array as A
 
 data IMM =
     I0     -- ^ 0
@@ -68,75 +68,231 @@ cmpOrd C_GE = 3
 cmpOrd C_GT = 4
 cmpOrd C_LE = 5
 
-toCmp :: Int -> Maybe CMP
-toCmp 0 = Just C_EQ
-toCmp 1 = Just C_NE
-toCmp 2 = Just C_LT
-toCmp 3 = Just C_GE
-toCmp 4 = Just C_GT
-toCmp 5 = Just C_LE
-toCmp _ = Nothing
+toCmp :: Int -> Decoder CMP
+toCmp 1 = pure C_NE
+toCmp 0 = pure C_EQ
+toCmp 2 = pure C_LT
+toCmp 3 = pure C_GE
+toCmp 4 = pure C_GT
+toCmp 5 = pure C_LE
+toCmp c = fail $ \offset -> GenericParserError { offset, message: "Unknown instruction byte code: " <> show c}
 
+data MathOp = ADD | SUB | MUL | DIV | REM | NEG
+data JNumType = MT_I | MT_L | MT_F | MT_D
+
+mathTypeOrd :: JNumType -> Int
+mathTypeOrd MT_I = 0
+mathTypeOrd MT_L = 1
+mathTypeOrd MT_F = 2
+mathTypeOrd MT_D = 3
+
+mathOpOrd :: MathOp -> Int
+mathOpOrd ADD = 96
+mathOpOrd SUB = 100
+mathOpOrd MUL = 104
+mathOpOrd DIV = 108
+mathOpOrd REM = 112
+mathOpOrd NEG = 116
+
+mathInstrOrd :: MathOp -> JNumType -> Int
+mathInstrOrd op typ = (mathOpOrd op) + (mathTypeOrd typ)
+
+mathInstruction :: Int -> Decoder Instruction
+mathInstruction cd = 
+  let code = cd - (mathOpOrd ADD)
+      tp = code `mod` 4
+  in do
+      op <- mathOpFromOrd cd code
+      typ <- mathTypeFromOrd cd tp
+      pure $ MATH op typ
+  where
+    mathOpFromOrd :: Int -> Int -> Decoder MathOp
+    mathOpFromOrd _ x | x >= 96  && x < 100 = pure ADD  
+    mathOpFromOrd _ x | x >= 100 && x < 104 = pure SUB 
+    mathOpFromOrd _ x | x >= 104 && x < 108 = pure MUL 
+    mathOpFromOrd _ x | x >= 108 && x < 112 = pure DIV 
+    mathOpFromOrd _ x | x >= 112 && x < 116 = pure REM 
+    mathOpFromOrd _ x | x >= 116 && x < 120 = pure NEG 
+    mathOpFromOrd ch _ = fail $ \offset -> GenericParserError { offset, message: "Unknown instruction byte code: " <> show ch}
+
+    mathTypeFromOrd :: Int -> Int -> Decoder JNumType 
+    mathTypeFromOrd _ 0 = pure MT_I 
+    mathTypeFromOrd _ 1 = pure MT_L 
+    mathTypeFromOrd _ 2 = pure MT_F 
+    mathTypeFromOrd _ 3 = pure MT_D
+    mathTypeFromOrd ch _ = fail $ \offset -> GenericParserError { offset, message: "Unknown instruction byte code: " <> show ch}
+
+derive instance eqMathOp :: Eq MathOp
+derive instance ordMathOp :: Ord MathOp
+
+derive instance genericMathOp :: Generic MathOp _
+
+instance showMathOp :: Show MathOp where
+  show = genericShow
+
+derive instance eqJNumType :: Eq JNumType
+derive instance ordJNumType :: Ord JNumType
+
+derive instance genericJNumType :: Generic JNumType _
+
+instance showJNumType :: Show JNumType where
+  show = genericShow
+
+data MemOpType = LT_I | LT_L | LT_F | LT_D | LT_A
+
+data MemOp =  LOAD MemOpType Word8
+                | LOAD_IMM MemOpType IMM
+                | ALOAD MemOpType
+                | BALOAD
+                | CALOAD
+                | SALOAD
+                | STORE MemOpType Word8
+                | STORE_IMM MemOpType IMM
+                | ASTORE MemOpType 
+                | BASTORE        
+                | CASTORE        
+                | SASTORE        
+
+derive instance eqMemOpType :: Eq MemOpType
+derive instance ordMemOpType :: Ord MemOpType
+
+derive instance genericMemOpType :: Generic MemOpType _
+
+instance showMemOpType :: Show MemOpType where
+  show = genericShow
+
+derive instance eqMemOp :: Eq MemOp
+derive instance ordMemOp :: Ord MemOp
+
+derive instance genericMemOp :: Generic MemOp _
+
+instance showMemOp :: Show MemOp where
+  show = genericShow
+
+memTypeOrd :: MemOpType -> Int
+memTypeOrd LT_I = 0
+memTypeOrd LT_L = 1
+memTypeOrd LT_F = 2
+memTypeOrd LT_D = 3
+memTypeOrd LT_A = 4
+
+putMemOp :: MemOp -> Put
+putMemOp (LOAD lt w8        ) = put1 (21 + (memTypeOrd lt)) w8
+putMemOp (LOAD_IMM lt i   ) = putImm (26 + ((memTypeOrd lt) * 4)) i
+putMemOp (ALOAD lt          ) = putWord8 (46 + (memTypeOrd lt))
+putMemOp (BALOAD            ) = putWord8 51
+putMemOp (CALOAD            ) = putWord8 52
+putMemOp (SALOAD            ) = putWord8 53
+putMemOp (STORE lt w8       ) = put1 (54 + (memTypeOrd lt)) w8
+putMemOp (STORE_IMM lt i  ) = putImm (59 + ((memTypeOrd lt) * 4)) i
+putMemOp (ASTORE lt         ) = putWord8 (79 + (memTypeOrd lt))
+putMemOp (BASTORE           ) = putWord8 84
+putMemOp (CASTORE           ) = putWord8 85
+putMemOp (SASTORE           ) = putWord8 86
+
+getMemOp :: Int -> Decoder MemOp
+getMemOp 21 = (LOAD LT_I) <$> get
+getMemOp 22 = (LOAD LT_L) <$> get
+getMemOp 23 = (LOAD LT_F) <$> get
+getMemOp 24 = (LOAD LT_D) <$> get
+getMemOp 25 = (LOAD LT_A) <$> get
+getMemOp 47 = pure $ ALOAD $ LT_L
+getMemOp 46 = pure $ ALOAD $ LT_I
+getMemOp 48 = pure $ ALOAD $ LT_F
+getMemOp 49 = pure $ ALOAD $ LT_D
+getMemOp 50 = pure $ ALOAD $ LT_A
+getMemOp 51 = pure $ BALOAD
+getMemOp 52 = pure $ CALOAD
+getMemOp 53 = pure $ SALOAD
+getMemOp 54 = (STORE LT_I) <$> get
+getMemOp 55 = (STORE LT_L) <$> get
+getMemOp 56 = (STORE LT_F) <$> get
+getMemOp 57 = (STORE LT_D) <$> get
+getMemOp 58 = (STORE LT_A) <$> get
+getMemOp 79 = pure $ ASTORE LT_I
+getMemOp 80 = pure $ ASTORE LT_L
+getMemOp 81 = pure $ ASTORE LT_F
+getMemOp 82 = pure $ ASTORE LT_D
+getMemOp 83 = pure $ ASTORE LT_A
+getMemOp 84 = pure BASTORE
+getMemOp 85 = pure CASTORE
+getMemOp 86 = pure SASTORE
+getMemOp c  | inRange 59 62 c = imm 59 (STORE_IMM LT_I) c
+              | inRange 63 66 c = imm 63 (STORE_IMM LT_L) c
+              | inRange 67 70 c = imm 67 (STORE_IMM LT_F) c
+              | inRange 71 74 c = imm 71 (STORE_IMM LT_D) c
+              | inRange 75 78 c = imm 75 (STORE_IMM LT_A) c
+              | inRange 26 29 c = imm 26 (LOAD_IMM LT_I) c
+              | inRange 30 33 c = imm 30 (LOAD_IMM LT_L) c
+              | inRange 34 37 c = imm 34 (LOAD_IMM LT_F) c
+              | inRange 38 41 c = imm 38 (LOAD_IMM LT_D) c
+              | inRange 42 45 c = imm 42 (LOAD_IMM LT_A) c
+              | otherwise       = fail $ \offset -> GenericParserError { offset, message: "Unknown instruction byte code: " <> show c}
+
+data ConstOp = 
+    ACONST_NULL             
+  | CONST_M1                
+  | CONST_0 JNumType        
+  | CONST_1 JNumType        
+  | ICONST_2                
+  | ICONST_3                
+  | ICONST_4                
+  | ICONST_5                
+  | FCONST_2                
+  
+constOpOrd :: ConstOp -> Int
+constOpOrd ACONST_NULL   = 1
+constOpOrd CONST_M1      = 2
+constOpOrd (CONST_0 MT_I)  = 3
+constOpOrd (CONST_1 MT_I)  = 4
+constOpOrd ICONST_2      = 5
+constOpOrd ICONST_3      = 6
+constOpOrd ICONST_4      = 7
+constOpOrd ICONST_5      = 8
+constOpOrd FCONST_2      = 13
+constOpOrd (CONST_0 MT_L)  = 9
+constOpOrd (CONST_1 MT_L)  = 10
+constOpOrd (CONST_0 MT_F)  = 11
+constOpOrd (CONST_1 MT_F)  = 12
+constOpOrd (CONST_0 MT_D)  = 14
+constOpOrd (CONST_1 MT_D)  = 15
+
+constOpFromOrd :: Int -> Decoder ConstOp
+constOpFromOrd 1  = pure $ ACONST_NULL  
+constOpFromOrd 2  = pure $ CONST_M1     
+constOpFromOrd 3  = pure $ CONST_0 MT_I 
+constOpFromOrd 4  = pure $ CONST_1 MT_I 
+constOpFromOrd 5  = pure $ ICONST_2     
+constOpFromOrd 6  = pure $ ICONST_3     
+constOpFromOrd 7  = pure $ ICONST_4     
+constOpFromOrd 8  = pure $ ICONST_5     
+constOpFromOrd 13 = pure $ FCONST_2     
+constOpFromOrd 9  = pure $ CONST_0 MT_L 
+constOpFromOrd 10 = pure $ CONST_1 MT_L 
+constOpFromOrd 11 = pure $ CONST_0 MT_F 
+constOpFromOrd 12 = pure $ CONST_1 MT_F 
+constOpFromOrd 14 = pure $ CONST_0 MT_D 
+constOpFromOrd 15 = pure $ CONST_1 MT_D 
+constOpFromOrd c  = fail $ \offset -> GenericParserError { offset, message: "Unknown instruction byte code: " <> show c}
+
+derive instance eqConstOp :: Eq ConstOp
+derive instance ordConstOp :: Ord ConstOp
+
+derive instance genericConstOp :: Generic ConstOp _
+
+instance showConstOp :: Show ConstOp where
+  show = genericShow
 
 -- | JVM instruction set. For comments, see JVM specification.
 data Instruction =
     NOP            -- ^ 0
-  | ACONST_NULL    -- ^ 1
-  | ICONST_M1      -- ^ 2
-  | ICONST_0       -- ^ 3
-  | ICONST_1       -- ^ 4
-  | ICONST_2       -- ^ 5
-  | ICONST_3       -- ^ 6
-  | ICONST_4       -- ^ 7
-  | ICONST_5       -- ^ 8
-  | LCONST_0       -- ^ 9
-  | LCONST_1       -- ^ 10
-  | FCONST_0       -- ^ 11
-  | FCONST_1       -- ^ 12
-  | FCONST_2       -- ^ 13
-  | DCONST_0       -- ^ 14
-  | DCONST_1       -- ^ 15
+  | CONST ConstOp
   | BIPUSH Word8   -- ^ 16
   | SIPUSH Word16  -- ^ 17
   | LDC1 Word8     -- ^ 18
   | LDC2 Word16    -- ^ 19
   | LDC2W Word16   -- ^ 20
-  | ILOAD Word8    -- ^ 21
-  | LLOAD Word8    -- ^ 22
-  | FLOAD Word8    -- ^ 23
-  | DLOAD Word8    -- ^ 24
-  | ALOAD Word8    -- ^ 25
-  | ILOAD_ IMM     -- ^ 26, 27, 28, 29
-  | LLOAD_ IMM     -- ^ 30, 31, 32, 33
-  | FLOAD_ IMM     -- ^ 34, 35, 36, 37
-  | DLOAD_ IMM     -- ^ 38, 39, 40, 41
-  | ALOAD_ IMM     -- ^ 42, 43, 44, 45
-  | IALOAD         -- ^ 46
-  | LALOAD         -- ^ 47
-  | FALOAD         -- ^ 48
-  | DALOAD         -- ^ 49
-  | AALOAD         -- ^ 50
-  | BALOAD         -- ^ 51
-  | CALOAD         -- ^ 52
-  | SALOAD         -- ^ 53
-  | ISTORE Word8   -- ^ 54
-  | LSTORE Word8   -- ^ 55
-  | FSTORE Word8   -- ^ 56
-  | DSTORE Word8   -- ^ 57
-  | ASTORE Word8   -- ^ 58
-  | ISTORE_ IMM    -- ^ 59, 60, 61, 62
-  | LSTORE_ IMM    -- ^ 63, 64, 65, 66
-  | FSTORE_ IMM    -- ^ 67, 68, 69, 70
-  | DSTORE_ IMM    -- ^ 71, 72, 73, 74
-  | ASTORE_ IMM    -- ^ 75, 76, 77, 78
-  | IASTORE        -- ^ 79
-  | LASTORE        -- ^ 80
-  | FASTORE        -- ^ 81
-  | DASTORE        -- ^ 82
-  | AASTORE        -- ^ 83
-  | BASTORE        -- ^ 84
-  | CASTORE        -- ^ 85
-  | SASTORE        -- ^ 86
+  | MEM MemOp
   | POP            -- ^ 87
   | POP2           -- ^ 88
   | DUP            -- ^ 89
@@ -146,30 +302,7 @@ data Instruction =
   | DUP2_X1        -- ^ 93
   | DUP2_X2        -- ^ 94
   | SWAP           -- ^ 95
-  | IADD           -- ^ 96
-  | LADD           -- ^ 97
-  | FADD           -- ^ 98
-  | DADD           -- ^ 99
-  | ISUB           -- ^ 100
-  | LSUB           -- ^ 101
-  | FSUB           -- ^ 102
-  | DSUB           -- ^ 103
-  | IMUL           -- ^ 104
-  | LMUL           -- ^ 105
-  | FMUL           -- ^ 106
-  | DMUL           -- ^ 107
-  | IDIV           -- ^ 108
-  | LDIV           -- ^ 109
-  | FDIV           -- ^ 110
-  | DDIV           -- ^ 111
-  | IREM           -- ^ 112
-  | LREM           -- ^ 113
-  | FREM           -- ^ 114
-  | DREM           -- ^ 115
-  | INEG           -- ^ 116
-  | LNEG           -- ^ 117
-  | FNEG           -- ^ 118
-  | DNEG           -- ^ 119
+  | MATH MathOp JNumType -- (96..119)
   | ISHL           -- ^ 120
   | LSHL           -- ^ 121
   | ISHR           -- ^ 122
@@ -266,10 +399,10 @@ instance showArrayType :: Show ArrayType where
   show = genericShow
 
 -- | Parse opcode with immediate constant
-imm :: Int                   -- ^ Base opcode
-    -> (IMM -> Instruction)    -- ^ Instruction constructor
+imm :: forall a. Int                   -- ^ Base opcode
+    -> (IMM -> a)    -- ^ Instruction constructor
     -> Int                   -- ^ Opcode to parse
-    -> Decoder Instruction
+    -> Decoder a
 imm base constr x =
   let immValue = x - base
   in case toIMMEnum immValue of
@@ -281,7 +414,7 @@ imm base constr x =
 putImm :: Int                  -- ^ Base opcode
        -> IMM                  -- ^ Constant to add to opcode
        -> Put
-putImm base i = put $ Word8 $ fromInt $ base + (immOrdValue i)
+putImm base i = putWord8 $ base + (immOrdValue i)
 
 atype2byte :: ArrayType -> Word8
 atype2byte T_BOOLEAN  = Word8 $ fromInt 4
@@ -293,7 +426,7 @@ atype2byte T_SHORT    = Word8 $ fromInt 9
 atype2byte T_INT      = Word8 $ fromInt 10
 atype2byte T_LONG     = Word8 $ fromInt 11
 
-byte2atype :: Word8 -> Maybe ArrayType
+byte2atype :: Word8 -> Decoder ArrayType
 byte2atype (Word8 n) =
   case toInt n of
     4  -> pure T_BOOLEAN
@@ -304,7 +437,7 @@ byte2atype (Word8 n) =
     9  -> pure T_SHORT
     10 -> pure T_INT
     11 -> pure T_LONG
-    _ -> Nothing
+    x -> fail $ \offset -> GenericParserError { offset, message: "Unknown array type byte: " <> show x}
 
 inRange :: forall a. Ord a => a -> a -> a -> Boolean
 inRange l h v = (v >= l) && (v <= h)
@@ -312,9 +445,7 @@ inRange l h v = (v >= l) && (v <= h)
 instance binaryArrayType :: Binary ArrayType where
   get = do
     x <- get
-    case byte2atype x of
-      Nothing -> fail $ \offset -> GenericParserError { offset, message: "Unknown array type byte: " <> show x}
-      (Just r) -> pure r
+    byte2atype x
 
   put t = put (atype2byte t)
 
@@ -338,131 +469,62 @@ put2 code x y =
   put x <>
   put y
 
+putWord8 :: Int -> Put
+putWord8 i = put $ Word8 $ fromInt i
+
 instance binaryInstruction :: Binary Instruction where
-  put  NOP         = put $ Word8 $ fromInt 0
-  put  ACONST_NULL = put $ Word8 $ fromInt 1
-  put  ICONST_M1   = put $ Word8 $ fromInt 2
-  put  ICONST_0    = put $ Word8 $ fromInt 3
-  put  ICONST_1    = put $ Word8 $ fromInt 4
-  put  ICONST_2    = put $ Word8 $ fromInt 5
-  put  ICONST_3    = put $ Word8 $ fromInt 6
-  put  ICONST_4    = put $ Word8 $ fromInt 7
-  put  ICONST_5    = put $ Word8 $ fromInt 8
-  put  LCONST_0    = put $ Word8 $ fromInt 9
-  put  LCONST_1    = put $ Word8 $ fromInt 10
-  put  FCONST_0    = put $ Word8 $ fromInt 11
-  put  FCONST_1    = put $ Word8 $ fromInt 12
-  put  FCONST_2    = put $ Word8 $ fromInt 13
-  put  DCONST_0    = put $ Word8 $ fromInt 14
-  put  DCONST_1    = put $ Word8 $ fromInt 15
+  put  NOP         = putWord8 0
+  put (CONST cp)  = putWord8 $ constOpOrd cp
   put (BIPUSH x)   = put1 16 x
   put (SIPUSH x)   = put1 17 x
   put (LDC1 x)     = put1 18 x
   put (LDC2 x)     = put1 19 x
   put (LDC2W x)    = put1 20 x
-  put (ILOAD x)    = put1 21 x
-  put (LLOAD x)    = put1 22 x
-  put (FLOAD x)    = put1 23 x
-  put (DLOAD x)    = put1 24 x
-  put (ALOAD x)    = put1 25 x
-  put (ILOAD_ i)   = putImm 26 i
-  put (LLOAD_ i)   = putImm 30 i
-  put (FLOAD_ i)   = putImm 34 i
-  put (DLOAD_ i)   = putImm 38 i
-  put (ALOAD_ i)   = putImm 42 i
-  put  IALOAD      = put $ Word8 $ fromInt 46
-  put  LALOAD      = put $ Word8 $ fromInt 47
-  put  FALOAD      = put $ Word8 $ fromInt 48
-  put  DALOAD      = put $ Word8 $ fromInt 49
-  put  AALOAD      = put $ Word8 $ fromInt 50
-  put  BALOAD      = put $ Word8 $ fromInt 51
-  put  CALOAD      = put $ Word8 $ fromInt 52
-  put  SALOAD      = put $ Word8 $ fromInt 53
-  put (ISTORE x)   = put1  54 x
-  put (LSTORE x)   = put1  55 x
-  put (FSTORE x)   = put1  56 x
-  put (DSTORE x)   = put1  57 x
-  put (ASTORE x)   = put1  58 x
-  put (ISTORE_ i)  = putImm 59 i
-  put (LSTORE_ i)  = putImm 63 i
-  put (FSTORE_ i)  = putImm 67 i
-  put (DSTORE_ i)  = putImm 71 i
-  put (ASTORE_ i)  = putImm 75 i
-  put  IASTORE     = put $ Word8 $ fromInt 79
-  put  LASTORE     = put $ Word8 $ fromInt 80
-  put  FASTORE     = put $ Word8 $ fromInt 81
-  put  DASTORE     = put $ Word8 $ fromInt 82
-  put  AASTORE     = put $ Word8 $ fromInt 83
-  put  BASTORE     = put $ Word8 $ fromInt 84
-  put  CASTORE     = put $ Word8 $ fromInt 85
-  put  SASTORE     = put $ Word8 $ fromInt 86
-  put  POP         = put $ Word8 $ fromInt 87
-  put  POP2        = put $ Word8 $ fromInt 88
-  put  DUP         = put $ Word8 $ fromInt 89
-  put  DUP_X1      = put $ Word8 $ fromInt 90
-  put  DUP_X2      = put $ Word8 $ fromInt 91
-  put  DUP2        = put $ Word8 $ fromInt 92
-  put  DUP2_X1     = put $ Word8 $ fromInt 93
-  put  DUP2_X2     = put $ Word8 $ fromInt 94
-  put  SWAP        = put $ Word8 $ fromInt 95
-  put  IADD        = put $ Word8 $ fromInt 96
-  put  LADD        = put $ Word8 $ fromInt 97
-  put  FADD        = put $ Word8 $ fromInt 98
-  put  DADD        = put $ Word8 $ fromInt 99
-  put  ISUB        = put $ Word8 $ fromInt 100
-  put  LSUB        = put $ Word8 $ fromInt 101
-  put  FSUB        = put $ Word8 $ fromInt 102
-  put  DSUB        = put $ Word8 $ fromInt 103
-  put  IMUL        = put $ Word8 $ fromInt 104
-  put  LMUL        = put $ Word8 $ fromInt 105
-  put  FMUL        = put $ Word8 $ fromInt 106
-  put  DMUL        = put $ Word8 $ fromInt 107
-  put  IDIV        = put $ Word8 $ fromInt 108
-  put  LDIV        = put $ Word8 $ fromInt 109
-  put  FDIV        = put $ Word8 $ fromInt 110
-  put  DDIV        = put $ Word8 $ fromInt 111
-  put  IREM        = put $ Word8 $ fromInt 112
-  put  LREM        = put $ Word8 $ fromInt 113
-  put  FREM        = put $ Word8 $ fromInt 114
-  put  DREM        = put $ Word8 $ fromInt 115
-  put  INEG        = put $ Word8 $ fromInt 116
-  put  LNEG        = put $ Word8 $ fromInt 117
-  put  FNEG        = put $ Word8 $ fromInt 118
-  put  DNEG        = put $ Word8 $ fromInt 119
-  put  ISHL        = put $ Word8 $ fromInt 120
-  put  LSHL        = put $ Word8 $ fromInt 121
-  put  ISHR        = put $ Word8 $ fromInt 122
-  put  LSHR        = put $ Word8 $ fromInt 123
-  put  IUSHR       = put $ Word8 $ fromInt 124
-  put  LUSHR       = put $ Word8 $ fromInt 125
-  put  IAND        = put $ Word8 $ fromInt 126
-  put  LAND        = put $ Word8 $ fromInt 127
-  put  IOR         = put $ Word8 $ fromInt 128
-  put  LOR         = put $ Word8 $ fromInt 129
-  put  IXOR        = put $ Word8 $ fromInt 130
-  put  LXOR        = put $ Word8 $ fromInt 131
+  put (MEM lop)  = putMemOp lop
+  put  POP         = putWord8 87
+  put  POP2        = putWord8 88
+  put  DUP         = putWord8 89
+  put  DUP_X1      = putWord8 90
+  put  DUP_X2      = putWord8 91
+  put  DUP2        = putWord8 92
+  put  DUP2_X1     = putWord8 93
+  put  DUP2_X2     = putWord8 94
+  put  SWAP        = putWord8 95
+  put  (MATH op t) = putWord8 (mathInstrOrd op t)
+  put  ISHL        = putWord8 120
+  put  LSHL        = putWord8 121
+  put  ISHR        = putWord8 122
+  put  LSHR        = putWord8 123
+  put  IUSHR       = putWord8 124
+  put  LUSHR       = putWord8 125
+  put  IAND        = putWord8 126
+  put  LAND        = putWord8 127
+  put  IOR         = putWord8 128
+  put  LOR         = putWord8 129
+  put  IXOR        = putWord8 130
+  put  LXOR        = putWord8 131
   put (IINC x y)      = put2 132 x y
-  put  I2L            = put $ Word8 $ fromInt 133
-  put  I2F            = put $ Word8 $ fromInt 134
-  put  I2D            = put $ Word8 $ fromInt 135
-  put  L2I            = put $ Word8 $ fromInt 136
-  put  L2F            = put $ Word8 $ fromInt 137
-  put  L2D            = put $ Word8 $ fromInt 138
-  put  F2I            = put $ Word8 $ fromInt 139
-  put  F2L            = put $ Word8 $ fromInt 140
-  put  F2D            = put $ Word8 $ fromInt 141
-  put  D2I            = put $ Word8 $ fromInt 142
-  put  D2L            = put $ Word8 $ fromInt 143
-  put  D2F            = put $ Word8 $ fromInt 144
-  put  I2B            = put $ Word8 $ fromInt 145
-  put  I2C            = put $ Word8 $ fromInt 146
-  put  I2S            = put $ Word8 $ fromInt 147
-  put  LCMP           = put $ Word8 $ fromInt 148
-  put (FCMP C_LT)     = put $ Word8 $ fromInt 149
-  put (FCMP C_GT)     = put $ Word8 $ fromInt 150
+  put  I2L            = putWord8 133
+  put  I2F            = putWord8 134
+  put  I2D            = putWord8 135
+  put  L2I            = putWord8 136
+  put  L2F            = putWord8 137
+  put  L2D            = putWord8 138
+  put  F2I            = putWord8 139
+  put  F2L            = putWord8 140
+  put  F2D            = putWord8 141
+  put  D2I            = putWord8 142
+  put  D2L            = putWord8 143
+  put  D2F            = putWord8 144
+  put  I2B            = putWord8 145
+  put  I2C            = putWord8 146
+  put  I2S            = putWord8 147
+  put  LCMP           = putWord8 148
+  put (FCMP C_LT)     = putWord8 149
+  put (FCMP C_GT)     = putWord8 150
   put (FCMP c)        = putFail $ \_ -> "No such instruction: FCMP " <> show c
-  put (DCMP C_LT)     = put $ Word8 $ fromInt 151
-  put (DCMP C_GT)     = put $ Word8 $ fromInt 152
+  put (DCMP C_LT)     = putWord8 151
+  put (DCMP C_GT)     = putWord8 152
   put (DCMP c)        = putFail $ \_ -> "No such instruction: DCMP " <> show c
   put (IF c x)        = put (Word8 $ fromInt $ 153 + (cmpOrd c)) <>
                         put x
@@ -473,7 +535,7 @@ instance binaryInstruction :: Binary Instruction where
                         put x
   put (GOTO x)        = put1 167 x
   put (JSR x)         = put1 168 x
-  put  RET            = put $ Word8 $ fromInt 169
+  put  RET            = putWord8 169
   put (TABLESWITCH _ def low high offs) =
                                    put (Word8 $ fromInt 170) <>
                                    putPad padding (Word8 $ fromInt 0) <>
@@ -487,12 +549,12 @@ instance binaryInstruction :: Binary Instruction where
                                    put n <>
                                    putFoldable pairs
 
-  put  IRETURN        = put $ Word8 $ fromInt 172
-  put  LRETURN        = put $ Word8 $ fromInt 173
-  put  FRETURN        = put $ Word8 $ fromInt 174
-  put  DRETURN        = put $ Word8 $ fromInt 175
-  put  ARETURN        = put $ Word8 $ fromInt 176
-  put  RETURN         = put $ Word8 $ fromInt 177
+  put  IRETURN        = putWord8 172
+  put  LRETURN        = putWord8 173
+  put  FRETURN        = putWord8 174
+  put  DRETURN        = putWord8 175
+  put  ARETURN        = putWord8 176
+  put  RETURN         = putWord8 177
   put (GETSTATIC x)   = put1 178 x
   put (PUTSTATIC x)   = put1 179 x
   put (GETFIELD x)    = put1 180 x
@@ -506,12 +568,12 @@ instance binaryInstruction :: Binary Instruction where
   put (NEW x)         = put1 187 x
   put (NEWARRAY x)    = put1 188 x
   put (ANEWARRAY x)   = put1 189 x
-  put  ARRAYLENGTH    = put $ Word8 $ fromInt 190
-  put  ATHROW         = put $ Word8 $ fromInt 191
+  put  ARRAYLENGTH    = putWord8 190
+  put  ATHROW         = putWord8 191
   put (CHECKCAST x)   = put1 192 x
   put (INSTANCEOF x)  = put1 193 x
-  put  MONITORENTER   = put $ Word8 $ fromInt 194
-  put  MONITOREXIT    = put $ Word8 $ fromInt 195
+  put  MONITORENTER   = putWord8 194
+  put  MONITOREXIT    = putWord8 195
   put (WIDE x inst)   = put2 196 x inst
   put (MULTINANEWARRAY x y) = put2 197 x y
   put (IFNULL x)      = put1 198 x
@@ -524,52 +586,11 @@ instance binaryInstruction :: Binary Instruction where
     let c = toInt ch
     case c of
       0 -> pure NOP
-      1 -> pure ACONST_NULL
-      2 -> pure ICONST_M1
-      3 -> pure ICONST_0
-      4 -> pure ICONST_1
-      5 -> pure ICONST_2
-      6 -> pure ICONST_3
-      7 -> pure ICONST_4
-      8 -> pure ICONST_5
-      9 -> pure LCONST_0
-      10 -> pure LCONST_1
-      11 -> pure FCONST_0
-      12 -> pure FCONST_1
-      13 -> pure FCONST_2
-      14 -> pure DCONST_0
-      15 -> pure DCONST_1
       16 -> BIPUSH <$> get
       17 -> SIPUSH <$> get
       18 -> LDC1 <$> get
       19 -> LDC2 <$> get
       20 -> LDC2W <$> get
-      21 -> ILOAD <$> get
-      22 -> LLOAD <$> get
-      23 -> FLOAD <$> get
-      24 -> DLOAD <$> get
-      25 -> ALOAD <$> get
-      46 -> pure IALOAD
-      47 -> pure LALOAD
-      48 -> pure FALOAD
-      49 -> pure DALOAD
-      50 -> pure AALOAD
-      51 -> pure BALOAD
-      52 -> pure CALOAD
-      53 -> pure SALOAD
-      54 -> ISTORE <$> get
-      55 -> LSTORE <$> get
-      56 -> FSTORE <$> get
-      57 -> DSTORE <$> get
-      58 -> ASTORE <$> get
-      79 -> pure IASTORE
-      80 -> pure LASTORE
-      81 -> pure FASTORE
-      82 -> pure DASTORE
-      83 -> pure AASTORE
-      84 -> pure BASTORE
-      85 -> pure CASTORE
-      86 -> pure SASTORE
       87 -> pure POP
       88 -> pure POP2
       89 -> pure DUP
@@ -579,30 +600,6 @@ instance binaryInstruction :: Binary Instruction where
       93 -> pure DUP2_X1
       94 -> pure DUP2_X2
       95 -> pure SWAP
-      96 -> pure IADD
-      97 -> pure LADD
-      98 -> pure FADD
-      99 -> pure DADD
-      100 -> pure ISUB
-      101 -> pure LSUB
-      102 -> pure FSUB
-      103 -> pure DSUB
-      104 -> pure IMUL
-      105 -> pure LMUL
-      106 -> pure FMUL
-      107 -> pure DMUL
-      108 -> pure IDIV
-      109 -> pure LDIV
-      110 -> pure FDIV
-      111 -> pure DDIV
-      112 -> pure IREM
-      113 -> pure LREM
-      114 -> pure FREM
-      115 -> pure DREM
-      116 -> pure INEG
-      117 -> pure LNEG
-      118 -> pure FNEG
-      119 -> pure DNEG
       120 -> pure ISHL
       121 -> pure LSHL
       122 -> pure ISHR
@@ -687,24 +684,11 @@ instance binaryInstruction :: Binary Instruction where
       199 -> IFNONNULL <$> get
       200 -> GOTO_W <$> get
       201 -> JSR_W <$> get
-      _ | inRange 59 62 c -> imm 59 ISTORE_ c
-        | inRange 63 66 c -> imm 63 LSTORE_ c
-        | inRange 67 70 c -> imm 67 FSTORE_ c
-        | inRange 71 74 c -> imm 71 DSTORE_ c
-        | inRange 75 78 c -> imm 75 ASTORE_ c
-        | inRange 26 29 c -> imm 26 ILOAD_ c
-        | inRange 30 33 c -> imm 30 LLOAD_ c
-        | inRange 34 37 c -> imm 34 FLOAD_ c
-        | inRange 38 41 c -> imm 38 DLOAD_ c
-        | inRange 42 45 c -> imm 42 ALOAD_ c
-        | inRange 15 15 c ->
-          case toCmp (c-153) of
-            Nothing -> fail $ \offset -> GenericParserError { offset, message: "Unknown instruction byte code: " <> show c}
-            (Just cmp) -> IF cmp <$> get
-        | inRange 15 16 c ->
-          case toCmp (c-159) of
-            Nothing -> fail $ \offset -> GenericParserError { offset, message: "Unknown instruction byte code: " <> show c}
-            (Just cmp) -> IF_ICMP cmp <$> get
+      _ | inRange 1 15 c -> CONST <$> (constOpFromOrd c)
+        | inRange 21 86 c -> MEM <$> (getMemOp c)
+        | inRange 96 119 c -> mathInstruction c
+        | inRange 153 158 c -> (\cmp -> IF cmp <$> get) =<< (toCmp $ c-153)
+        | inRange 159 164 c -> (\cmp -> IF_ICMP cmp <$> get) =<< (toCmp $ c-159)
         | otherwise -> fail $ \offset -> GenericParserError { offset, message: "Unknown instruction byte code: " <> show c}
 
 -- | Calculate padding for current bytecode offset (cf. TABLESWITCH and LOOKUPSWITCH)

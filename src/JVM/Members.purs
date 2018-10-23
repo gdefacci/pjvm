@@ -4,26 +4,20 @@ import Prelude
 
 import Data.Array as A
 import Data.Binary.Binary (class Binary, putFoldable, get, put)
-import Data.Binary.Put (Put(..))
-import Data.Binary.Decoder (Decoder(..), ParserError(..), fail, getChar8, getUInt8, lookAhead, skip)
-import Data.Binary.Types (Word16(..), Word32(..))
-import Data.Char (fromCharCode, toCharCode)
-import Data.Char as CH
+import Data.Binary.Decoder (Decoder, ParserError(..), fail, getChar8, getUInt8, lookAhead, skip)
+import Data.Binary.Types (Word16(..))
 import Data.Char.Unicode (isDigit)
 import Data.Foldable (intercalate)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Int (fromString)
 import Data.List.Lazy (replicateM)
-import Data.Map as M
 import Data.Maybe (Maybe(..))
 import Data.Newtype (class Newtype, unwrap)
 import Data.Set as S
 import Data.String.CodeUnits (fromCharArray)
-import Data.Tuple (Tuple(..))
 import Data.UInt (toInt)
-import Effect.Exception.Unsafe (unsafeThrow)
-import JVM.Attributes (AttributesDirect(..), AttributesFile(..), attributesList)
+import JVM.Attributes (AttributesDirect, AttributesFile(..), attributesList)
 import JVM.Flags (FieldAccessFlag, MethodAccessFlag)
 
 -- | Field signature format
@@ -152,22 +146,6 @@ derive instance repGenericMethodFile :: Generic MethodFile _
 derive instance eqMethodFile :: Eq MethodFile
 instance showMethodFile :: Show MethodFile where
   show = genericShow
-
--- | Size of attributes set at Direct stage
-arsize :: AttributesDirect -> Int
-arsize (AttributesDirect m) = A.length m
-
--- | Associative list of attributes at Direct stage
-arlist :: AttributesDirect -> (Array (Tuple String String))
-arlist (AttributesDirect m) = m
-
--- | Map of attributes at Direct stage
-arlookup :: String -> AttributesDirect -> Maybe String
-arlookup nm (AttributesDirect m) = M.lookup nm (M.fromFoldable m)
-
--- | Size of attributes set at File stage
-apsize :: AttributesFile -> Int
-apsize (AttributesFile list) = A.length list
 
 fieldNameType :: FieldDirect -> FieldNameType
 fieldNameType (FieldDirect (Field {fieldName, fieldSignature})) = FieldNameType

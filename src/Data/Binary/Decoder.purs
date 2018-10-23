@@ -39,15 +39,21 @@ instance showParserError :: Show ParserError where
 
 type Decoder a = ExceptT ParserError (State ParserState) a
 
-decodeBuffer :: forall a err. Show err => ExceptT err (State ParserState) a -> ArrayBuffer -> Effect (Tuple ByteOffset a)
-decodeBuffer decoder buf =
-  let (Tuple r {offset}) = runDecoder decoder 0 (DV.whole buf)
-  in case r of
+decode :: forall err a. ExceptT err (State ParserState) a -> ArrayBuffer -> Either err (Tuple ParserState a)
+decode decoder buf =
+  toReult $ runDecoder decoder 0 (DV.whole buf)
+  where
+    toReult (Tuple (Left err) s) = Left err
+    toReult (Tuple (Right v) s) = Right $ Tuple s v
+
+decodeBuffer :: forall a. ExceptT ParserError (State ParserState) a -> ArrayBuffer -> Effect (Tuple ParserState a)
+decodeBuffer decoder arr =
+  case decode (consumeAllInput decoder) arr of
     (Left err) -> throw (show err)
-    (Right v) -> pure $ Tuple offset v
+    (Right v) -> pure v
 
 decodeFull :: forall a. ExceptT ParserError (State ParserState) a -> ArrayBuffer -> Effect a
-decodeFull decoder arr = snd <$> (decodeBuffer (consumeAllInput decoder) arr)
+decodeFull decoder arr = snd <$> (decodeBuffer decoder arr)
 
 runDecoder :: forall a err. ExceptT err (State ParserState) a
                             -> ByteOffset

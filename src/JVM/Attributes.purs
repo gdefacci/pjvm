@@ -2,14 +2,16 @@ module JVM.Attributes where
 
 import Prelude
 
+import Data.Map as M
 import Data.Binary.Binary (class Binary, putFoldable, get, put)
-import Data.Binary.Decoder (ByteLengthString(..), getRep)
-import Data.Binary.Types (Word16, Word32(..), Word8(..))
+import Data.Binary.Decoder (getRep)
+import Data.Binary.Types (Word16, Word32, Word8)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
+import Data.Maybe (Maybe)
 import Data.Newtype (unwrap)
 import Data.Tuple (Tuple)
-import Data.UInt (fromInt, toInt)
+import Data.UInt (toInt)
 
 -- | Any (class/ field/ method/ ...) attribute format.
 -- Some formats specify special formats for @attributeValue@.
@@ -24,7 +26,7 @@ derive instance eqAttribute :: Eq Attribute
 instance showAttribute :: Show Attribute where
   show = genericShow
 
-newtype AttributesDirect = AttributesDirect (Array (Tuple String String))
+newtype AttributesDirect = AttributesDirect (Array (Tuple String (Array Word8)))
 
 derive instance repGenericAttributesDirect :: Generic AttributesDirect _
 derive instance eqAttributesDirect :: Eq AttributesDirect
@@ -53,3 +55,7 @@ instance attributeBinary :: Binary Attribute where
 
 attributesList :: AttributesFile -> Array Attribute
 attributesList (AttributesFile attrs) = attrs
+
+-- | Map of attributes at Direct stage
+attributesDirectLookup :: String -> AttributesDirect -> Maybe (Array Word8)
+attributesDirectLookup nm (AttributesDirect m) = M.lookup nm (M.fromFoldable m)

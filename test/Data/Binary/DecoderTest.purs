@@ -28,7 +28,7 @@ spec = do
 testGetString :: Aff Unit
 testGetString = do
   let ab = AB.fromIntArray [0, 5, 100, 101, 102, 103, 104]
-  (Tuple ofst str) <- liftEffect $ decodeBuffer getString ab
+  (Tuple {offset:ofst} str) <- liftEffect $ decodeBuffer getString ab
   Assert.assert "string must be correct" $ str == "defgh"
   Assert.assert "must parse all the string" $ ofst == 7
 

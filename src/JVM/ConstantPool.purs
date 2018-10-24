@@ -9,6 +9,8 @@ import Data.Binary.Decoder (Decoder, ParserError(..), fail)
 import Data.Binary.Put (Put)
 import Data.Binary.Types (Float32, Float64, Word16(..), Word32, Word64, Word8(..))
 import Data.Foldable (foldMap)
+import Data.Generic.Rep (class Generic)
+import Data.Generic.Rep.Show (genericShow)
 import Data.Map as M
 import Data.Tuple (Tuple(..))
 import Data.UInt (fromInt, toInt)
@@ -28,19 +30,24 @@ data Constant b f m =
   | CUTF8 {getString :: String}
   | CUnicode {getString :: String}
 
+derive instance genericConstant :: Generic (Constant b f m) _
+
 instance showConstant :: (Show b, Show f, Show m) => Show (Constant b f m) where
+  show = genericShow
+
+{- instance showConstant :: (Show b, Show f, Show m) => Show (Constant b f m) where
   show (CClass name) = "class " <> show name
   show (CField cls nt) = "field " <> show cls <> "." <> show nt
   show (CMethod cls nt) = "method " <> show cls <> "." <> show nt
   show (CIfaceMethod cls nt) = "interface method " <> show cls <> "." <> show nt
-  show (CString s) = "String \"" <> show s <> "\""
-  show (CInteger x) = show x
-  show (CFloat x) = show x
-  show (CLong x) = show x
-  show (CDouble x) = show x
-  show (CNameType name tp) = show name <> ": " <> show tp
+  show (CString s) = "CString " <> show s 
+  show (CInteger x) = "CInteger " <> show x
+  show (CFloat x) = "CFloat " <> show x
+  show (CLong x) = "CLong " <> show x
+  show (CDouble x) = "CDouble " <> show x
+  show (CNameType name tp) = "CNameType " <> show name <> ": " <> show tp
   show (CUTF8 s) = "UTF8 \"" <> show s <> "\""
-  show (CUnicode s) = "Unicode \"" <> show s <> "\""
+  show (CUnicode s) = "Unicode \"" <> show s <> "\"" -}
 
 derive instance eqConstant :: (Eq b, Eq f, Eq m) => Eq (Constant b f m)
 
@@ -88,7 +95,7 @@ getPool n = do
     pure $ M.fromFoldable items
   where
     go = do
-      (Word16 i) <- ST.get
+      idx @ (Word16 i) <- ST.get
       if i > (fromInt n)
         then pure []
         else do
@@ -98,7 +105,7 @@ getPool n = do
                       else Word16 $ fromInt $ (toInt i) + 1
           ST.put i'
           next <- go
-          pure $ A.cons (Tuple i' c) next
+          pure $ A.cons (Tuple idx c) next
 
     getC :: Decoder ConstantFile
     getC = do

@@ -1,10 +1,12 @@
-module Data.Binary.Put (Put, charPut, fromSetter, putN, putFail, runPut, uint8Put) where
+module Data.Binary.Put (Put, charPut, fromSetter, putN, putFail, runPut, uint8Put, putToInt8Array) where
 
 import Prelude
 
 import Data.Array (fold)
 import Data.ArrayBuffer.ArrayBuffer (create)
 import Data.ArrayBuffer.DataView (Setter, setUint8, whole)
+import Data.ArrayBuffer.DataView as DV
+import Data.ArrayBuffer.Typed (asUint8Array, toIntArray)
 import Data.ArrayBuffer.Types (ArrayBuffer, ByteOffset, DataView)
 import Data.Char (toCharCode)
 import Data.Function (applyN)
@@ -13,6 +15,7 @@ import Data.Maybe (Maybe(..))
 import Data.UInt (UInt, fromInt)
 import Effect (Effect)
 import Effect.Exception (throw)
+import Effect.Unsafe (unsafePerformEffect)
 
 newtype Put = Put ( ByteOffset -> { newOffset::Int,  effect::DataView -> Effect Unit } )
 
@@ -86,4 +89,7 @@ charPut ch =
     Nothing -> putFail $ \ofst -> "Cant convert char " <> (show ch) <> " to modified UTF-8, offset" <> (show ofst)
     (Just cbs) -> fold $ (fromInt >>> uint8Put) <$> cbs
 
-
+putToInt8Array :: Put -> Array Int
+putToInt8Array put = unsafePerformEffect $ do
+  buf <- runPut put
+  pure $ toIntArray $ asUint8Array $ DV.whole buf

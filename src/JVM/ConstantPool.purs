@@ -31,23 +31,8 @@ data Constant b f m =
   | CUnicode {getString :: String}
 
 derive instance genericConstant :: Generic (Constant b f m) _
-
 instance showConstant :: (Show b, Show f, Show m) => Show (Constant b f m) where
   show = genericShow
-
-{- instance showConstant :: (Show b, Show f, Show m) => Show (Constant b f m) where
-  show (CClass name) = "class " <> show name
-  show (CField cls nt) = "field " <> show cls <> "." <> show nt
-  show (CMethod cls nt) = "method " <> show cls <> "." <> show nt
-  show (CIfaceMethod cls nt) = "interface method " <> show cls <> "." <> show nt
-  show (CString s) = "CString " <> show s 
-  show (CInteger x) = "CInteger " <> show x
-  show (CFloat x) = "CFloat " <> show x
-  show (CLong x) = "CLong " <> show x
-  show (CDouble x) = "CDouble " <> show x
-  show (CNameType name tp) = "CNameType " <> show name <> ": " <> show tp
-  show (CUTF8 s) = "UTF8 \"" <> show s <> "\""
-  show (CUnicode s) = "Unicode \"" <> show s <> "\"" -}
 
 derive instance eqConstant :: (Eq b, Eq f, Eq m) => Eq (Constant b f m)
 

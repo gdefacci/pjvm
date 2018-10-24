@@ -2,9 +2,11 @@ module Test.ReadClassMain where
 
 import Prelude
 
+import Data.Array (find)
 import Data.Array as A
 import Data.ArrayBuffer.ArrayBuffer as AB
 import Data.ArrayBuffer.DataView as DV
+import Data.ArrayBuffer.Typed (asUint8Array, toIntArray)
 import Data.ArrayBuffer.Types (ArrayBuffer, ByteOffset)
 import Data.Binary.Binary (get, put)
 import Data.Binary.Decoder (decodeFull)
@@ -27,7 +29,7 @@ import Node.FS.Aff as ND
 import Node.Path (concat)
 import Partial.Unsafe (unsafePartial)
 
-data Diff = Diff ByteOffset Int Int
+data Diff = Diff (Array Int) (Array Int)
             | DifferentSize Int Int
 
 derive instance genericDiff :: Generic Diff _
@@ -35,26 +37,14 @@ derive instance genericDiff :: Generic Diff _
 instance showDiff :: Show Diff where
   show = genericShow
 
-bufferEqual :: ArrayBuffer -> ArrayBuffer -> (Maybe Diff)
+bufferEqual :: ArrayBuffer -> ArrayBuffer -> Boolean
 bufferEqual bf1 bf2 =
-  let len1 = AB.byteLength bf1
-      len2 = AB.byteLength bf2
-  in if len1 /= len2
-        then Just $ DifferentSize len1 len2
-        else checkSameElements (DV.whole bf1) (DV.whole bf2) len1
-  where
-    checkSameElements dv1 dv2 len =
-      A.foldl accum Nothing $ A.range 0 (len - 1)
-      where
-        accum j @ (Just _) _ = j
-        accum _ idx =
-          let eff = do
-                      a1 <- (unsafePartial $ fromJust) <$> DV.getInt8 dv1 idx
-                      a2 <- (unsafePartial $ fromJust) <$> DV.getInt8 dv1 idx
-                      if a1 /= a2
-                        then pure $ Just $ Diff idx a1 a2
-                        else pure $ Nothing
-          in unsafePerformEffect eff
+  let dv1 = DV.whole bf1
+      dv2 = DV.whole bf2
+      toArray = asUint8Array >>> toIntArray
+      arr1 = toArray dv1
+      arr2 = toArray dv2
+  in arr1 == arr2
 
 main :: Effect Unit
 main = launchAff_ $ do

@@ -19,7 +19,7 @@ import Data.Maybe (Maybe(..))
 import Data.String.CodeUnits (fromCharArray)
 import Data.Tuple (Tuple(..), snd)
 import Data.UInt (UInt, toInt)
-import Effect (Effect)
+import Effect.Class (class MonadEffect, liftEffect)
 import Effect.Exception (throw)
 import Effect.Unsafe (unsafePerformEffect)
 
@@ -46,13 +46,13 @@ decode decoder buf =
     toReult (Tuple (Left err) s) = Left err
     toReult (Tuple (Right v) s) = Right $ Tuple s v
 
-decodeBuffer :: forall a. ExceptT ParserError (State ParserState) a -> ArrayBuffer -> Effect (Tuple ParserState a)
+decodeBuffer :: forall a m. MonadEffect m => ExceptT ParserError (State ParserState) a -> ArrayBuffer -> m (Tuple ParserState a)
 decodeBuffer decoder arr =
   case decode (consumeAllInput decoder) arr of
-    (Left err) -> throw (show err)
-    (Right v) -> pure v
+    (Left err) -> liftEffect $ throw (show err)
+    (Right v) -> liftEffect $ pure v
 
-decodeFull :: forall a. ExceptT ParserError (State ParserState) a -> ArrayBuffer -> Effect a
+decodeFull :: forall a m. MonadEffect m => ExceptT ParserError (State ParserState) a -> ArrayBuffer -> m a
 decodeFull decoder arr = snd <$> (decodeBuffer decoder arr)
 
 runDecoder :: forall a err. ExceptT err (State ParserState) a

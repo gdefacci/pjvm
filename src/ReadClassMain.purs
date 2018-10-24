@@ -20,7 +20,7 @@ import Effect.Class.Console (log)
 import Effect.Unsafe (unsafePerformEffect)
 import JVM.ClassFile (Class(..), ClassDirect(..), ClassFile(..))
 import JVM.ConstantPool (PoolDirect)
-import JVM.Convereter (File2DirectError, classFile2Direct, poolFile2Direct)
+import JVM.Converter.ToDirect (File2DirectError, classFile2Direct)
 import Node.Buffer as ND
 import Node.Encoding (Encoding(..))
 import Node.FS.Aff as ND

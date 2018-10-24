@@ -2,26 +2,29 @@ module JVM.Convereter where
 
 import Prelude
 
+import Control.Monad.Error.Class (class MonadThrow, throwError)
 import Control.Monad.Except (ExceptT)
-import Control.Monad.Reader (class MonadReader)
 import Control.Monad.State (State)
 import Data.Array (find)
 import Data.Array as A
 import Data.ArrayBuffer.ArrayBuffer as AB
 import Data.Binary.Binary as Binary
-import Data.Binary.Decoder (ParserState, decode)
-import Data.Binary.Types (Word16(..), Word8(..))
+import Data.Binary.Decoder (ParserError, ParserState, decode)
+import Data.Binary.Types (Word16(..), Word8)
 import Data.BitMask (toMask)
-import Data.Either (hush)
+import Data.Either (Either(..))
+import Data.Generic.Rep (class Generic)
+import Data.Generic.Rep.Show (genericShow)
 import Data.Map as M
 import Data.Maybe (Maybe(..))
 import Data.Newtype (unwrap)
-import Data.Tuple (Tuple(..), snd)
+import Data.Traversable (traverse)
+import Data.Tuple (Tuple(..))
 import Data.UInt (fromInt, toInt)
 import JVM.Attributes (Attribute(..), AttributesDirect(..), AttributesFile(..), attributesDirectLookup)
-import JVM.ClassFile (Class(..), ClassDirect(..))
-import JVM.ConstantPool (Constant(..), ConstantDirect, ConstantFile, PoolDirect, PoolFile)
-import JVM.Members (Field(..), FieldDirect(..), FieldFile(..), FieldNameType(..), Method(..), MethodDirect(..), MethodFile(..))
+import JVM.ClassFile (Class(..), ClassDirect(..), ClassFile(..))
+import JVM.ConstantPool (Constant(..), PoolDirect, PoolFile)
+import JVM.Members (Field(..), FieldDirect(..), FieldFile(..), FieldNameType(..), Method(..), MethodDirect(..), MethodFile(..), MethodNameType(..))
 
 -- | Size of attributes set at Direct stage
 arsize :: AttributesDirect -> Int
@@ -35,40 +38,71 @@ arlist (AttributesDirect m) = m
 apsize :: AttributesFile -> Int
 apsize (AttributesFile list) = A.length list
 
+data File2DirectError = 
+  MissingMethod String
+  | MissingField String
+  | MissingAttribute String
+  | ParseError ParserError
+  | MissingEntry String
+  | NoStringConst String
+  | NoClassConst String
+  | NoNameType String
+
+derive instance genricFile2DirectError :: Generic File2DirectError _
+
+instance showFile2DirectError :: Show File2DirectError where
+  show = genericShow
+
 -- | Try to get class method by name
-methodByName :: ClassDirect -> String -> Maybe (MethodDirect)
+methodByName :: forall m. MonadThrow File2DirectError m => ClassDirect -> String -> m MethodDirect
 methodByName (ClassDirect (Class {classMethods})) name =
-  find (\(MethodDirect (Method {methodName})) -> methodName == name) classMethods
+  case find (\(MethodDirect (Method {methodName})) -> methodName == name) classMethods of
+    Nothing -> throwError $ MissingMethod name
+    (Just v) -> pure v
 
 -- FIXME : remove
 -- | Try to get object attribute by name
-attrByName :: AttributesDirect -> String -> Maybe (Array Word8)
-attrByName a n = attributesDirectLookup n a
+attrByName :: forall m. MonadThrow File2DirectError m => AttributesDirect -> String -> m (Array Word8)
+attrByName a n = 
+  case attributesDirectLookup n a of
+    Nothing -> throwError $ MissingAttribute n
+    (Just v) -> pure v
 
-getString :: forall b f m. Constant b f m -> Maybe String
-getString (CUTF8 {getString: txt}) = Just txt
-getString (CUnicode {getString: txt}) = Just txt
-getString _ = Nothing
+getString :: forall b fld mthd m. MonadThrow File2DirectError m => Show b => Show fld => Show mthd => Constant b fld mthd -> m String
+getString (CUTF8 {getString: txt})    = pure txt
+getString (CUnicode {getString: txt}) = pure txt
+getString x = throwError $ NoStringConst $ show x
 
-attributesFile2Direct :: PoolDirect -> AttributesFile -> AttributesDirect
-attributesFile2Direct pool (AttributesFile attrs) = AttributesDirect (go =<< attrs)
+attributesFile2Direct :: forall m. MonadThrow File2DirectError m => PoolDirect -> AttributesFile -> m AttributesDirect
+attributesFile2Direct pool (AttributesFile attrs) = 
+  let attrs' = traverse go attrs
+  in AttributesDirect <$> attrs'
   where
-    go :: Attribute -> Array (Tuple String (Array Word8))
-    go (Attribute {attributeName, attributeValue}) = A.fromFoldable $ do
-      cnst <- M.lookup attributeName pool
+    go :: Attribute -> m (Tuple String (Array Word8))
+    go (Attribute {attributeName, attributeValue}) = do
+      cnst <- lookup attributeName pool
       nm <- getString cnst
       pure $ Tuple nm attributeValue
 
-decodeOpt :: forall err a. ExceptT err (State ParserState) a -> String -> Maybe a
-decodeOpt dec str = hush $ snd <$> decode dec (AB.fromString str)
+decodeOpt :: forall a m. MonadThrow File2DirectError m => ExceptT ParserError (State ParserState) a -> String -> m a
+decodeOpt dec str = 
+  case decode dec (AB.fromString str) of
+    (Left err) -> throwError $ ParseError err
+    (Right (Tuple _ v)) -> pure v
 
-methodFile2Direct :: PoolDirect -> MethodFile -> Maybe MethodDirect
+lookup :: forall k v m. MonadThrow File2DirectError m => Show k => Ord k => k -> M.Map k v -> m v
+lookup k mp = 
+  case M.lookup k mp of
+    (Just v) -> pure v
+    Nothing -> throwError $ MissingEntry $ show k
+
+methodFile2Direct :: forall m. MonadThrow File2DirectError m => PoolDirect -> MethodFile -> m MethodDirect
 methodFile2Direct pool (MethodFile (Method {methodAccessFlags, methodName, methodSignature, methodAttributes})) =
   do
     let methodAttributesCount = Word16 $ fromInt $ apsize methodAttributes
-        mattrs = attributesFile2Direct pool methodAttributes
-    mthdNm <- getString =<< (M.lookup methodName pool)
-    msig <- (decodeOpt Binary.get) =<< getString =<< (M.lookup methodSignature pool)
+    mattrs <- attributesFile2Direct pool methodAttributes
+    mthdNm <- getString =<< (lookup methodName pool)
+    msig <- (decodeOpt Binary.get) =<< getString =<< (lookup methodSignature pool)
     pure $ MethodDirect $ Method
       { methodAccessFlags : toMask $ toInt $ unwrap methodAccessFlags
       , methodName : mthdNm
@@ -76,13 +110,13 @@ methodFile2Direct pool (MethodFile (Method {methodAccessFlags, methodName, metho
       , methodAttributesCount
       , methodAttributes : mattrs }
 
-fieldFile2Direct :: PoolDirect -> FieldFile -> Maybe FieldDirect
+fieldFile2Direct :: forall m. MonadThrow File2DirectError m => PoolDirect -> FieldFile -> m FieldDirect
 fieldFile2Direct pool (FieldFile (Field {fieldAccessFlags, fieldName, fieldSignature, fieldAttributes})) =
   do
     let fieldAttributesCount = Word16 $ fromInt $ apsize fieldAttributes
-        fattrs = attributesFile2Direct pool fieldAttributes
-    fnm <- getString =<< (M.lookup fieldName pool)
-    fsig <- (decodeOpt Binary.get) =<< getString =<< (M.lookup fieldSignature pool)
+    fattrs <- attributesFile2Direct pool fieldAttributes
+    fnm <- getString =<< (lookup fieldName pool)
+    fsig <- (decodeOpt Binary.get) =<< getString =<< (lookup fieldSignature pool)
     pure $ FieldDirect $ Field
       { fieldAccessFlags : toMask $ toInt $ unwrap fieldAccessFlags
       , fieldName : fnm
@@ -90,69 +124,94 @@ fieldFile2Direct pool (FieldFile (Field {fieldAccessFlags, fieldName, fieldSigna
       , fieldAttributesCount
       , fieldAttributes : fattrs }
 
-getAsUTF8String :: PoolFile -> Word16 -> Maybe String
-getAsUTF8String pool idx =
-  asUTF8 =<< M.lookup idx pool
+getAsUTF8String :: forall m. MonadThrow File2DirectError m => PoolFile -> Word16 -> m String
+getAsUTF8String pool idx = do
+  asUTF8 =<< (lookup idx pool)
   where
-    asUTF8 (CUTF8 {getString : s}) = Just s
-    asUTF8 _ = Nothing
+    asUTF8 (CUTF8 {getString : s}) = pure s
+    asUTF8 x = throwError $ NoStringConst $ show x
 
-getAsString :: PoolFile -> Word16 -> Maybe String
+getAsString :: forall m. MonadThrow File2DirectError m => PoolFile -> Word16 -> m String
 getAsString pool idx =
-  asString =<< M.lookup idx pool
+  asString =<< lookup idx pool
   where
-    asString (CUTF8 {getString : s}) = Just s
-    asString (CUnicode {getString : s}) = Just s
-    asString _ = Nothing
+    asString (CUTF8 {getString : s})    = pure s
+    asString (CUnicode {getString : s}) = pure s
+    asString x = throwError $ NoStringConst $ show x
 
-convertClassName :: PoolFile -> Word16 -> Maybe String
+convertClassName :: forall m. MonadThrow File2DirectError m => PoolFile -> Word16 -> m String
 convertClassName pool i = do
-  cnst <- M.lookup i pool
+  cnst <- lookup i pool
   idx <- case cnst of
     (CClass nmIdx) -> pure nmIdx
-    _ -> Nothing
+    x -> throwError $ NoClassConst $ show x
   nm <- getAsString pool idx
   pure nm
 
-convertFieldNameType :: PoolFile -> Word16 -> Maybe FieldNameType
-convertFieldNameType pool i = do
-  cnst <- M.lookup i pool
+convertNameTypeTuple :: forall t m. MonadThrow File2DirectError m => Binary.Binary t => PoolFile -> Word16 -> m (Tuple String t)
+convertNameTypeTuple pool i = do
+  cnst <- lookup i pool
   case cnst of
     CNameType nmidx sidx -> do
       ntName <- getAsString pool nmidx
-      s <- getAsString pool sidx
-      ntSignature <- decodeOpt Binary.get s
-      pure $ FieldNameType {ntName, ntSignature}
-    _ -> Nothing
+      ntSignature <- (decodeOpt Binary.get) =<< (getAsString pool sidx)
+      pure $ (Tuple ntName ntSignature)
+    x -> throwError $ NoNameType $ show x
 
+convertFieldNameType :: forall m. MonadThrow File2DirectError m => PoolFile -> Word16 -> m FieldNameType
+convertFieldNameType pool i = 
+  (\(Tuple ntName ntSignature) -> FieldNameType {ntName, ntSignature} ) <$> (convertNameTypeTuple pool i)
 
-{--
-poolFile2Direct :: PoolFile -> PoolDirect
+convertMethodNameType :: forall m. MonadThrow File2DirectError m => PoolFile -> Word16 -> m MethodNameType
+convertMethodNameType pool i = 
+  (\(Tuple ntName ntSignature) -> MethodNameType {ntName, ntSignature} ) <$> (convertNameTypeTuple pool i)
+  
+poolFile2Direct :: forall m. MonadThrow File2DirectError m => PoolFile -> m PoolDirect
 poolFile2Direct ps =
-  pool poolIndex
+  traverse convert ps
   where
-    pool :: Pool Direct
-    pool = convert <$> ps
+    convert (CClass i) = CClass <$> (getAsString ps i)
+    convert (CField i j) = CField <$> (convertClassName ps i) <*> (convertFieldNameType ps j)
+    convert (CMethod i j) = CMethod <$> (convertClassName ps i) <*> (convertMethodNameType ps j)
+    convert (CIfaceMethod i j) = CIfaceMethod <$> (convertClassName ps i) <*> (convertMethodNameType ps j)
+    convert (CString i) = CString <$> (getAsString ps i)
+    convert (CFloat x)   = pure $ CFloat x
+    convert (CInteger x) = pure $ CInteger x
+    convert (CLong x)    = pure $ CLong x
+    convert (CDouble x)  = pure $ CDouble x
+    convert (CNameType i j) = CNameType <$> (getAsString ps i) <*> (getAsString ps j)
+    convert (CUTF8 bs)    = pure $ CUTF8 bs
+    convert (CUnicode bs) = pure $ CUnicode bs
 
-    n = fromIntegral $ M.size ps
-
-    convert _ (CClass i) = do
-      nm <- getAsUTF8String ps i
-      pure $ CClass name
-    convert (CField i j) = do
-      cls <- convertClassName ps i
-      fld <- convertFieldNameType ps j
-      CField cls fld
-
-    convert (CMethod i j) = CMethod (className $ pool ! i) (convertNameType j)
-    convert (CIfaceMethod i j) = CIfaceMethod (className $ pool ! i) (convertNameType j)
-    convert (CString i) = CString $ getString $ pool ! i
-    convert (CInteger x) = CInteger x
-    convert (CFloat x)   = CFloat x
-    convert (CLong x)    = CLong (fromIntegral x)
-    convert (CDouble x)  = CDouble x
-    convert (CNameType i j) = CNameType (getString $ pool ! i) (getString $ pool ! j)
-    convert (CUTF8 bs) = CUTF8 bs
-    convert (CUnicode bs) = CUnicode bs
-
---}
+classFile2Direct :: forall m. MonadThrow File2DirectError m => ClassFile -> m ClassDirect
+classFile2Direct (ClassFile (Class {magic,minorVersion,majorVersion,constsPoolSize,constsPool,accessFlags,
+                    thisClass,superClass,interfacesCount,interfaces,classFieldsCount,
+                    classFields,classMethodsCount,classMethods,classAttributesCount,classAttributes
+                  })) =
+  do
+    pool <- poolFile2Direct constsPool
+    superName <- if (toInt $ unwrap superClass) == 0 
+                    then pure "" 
+                    else convertClassName constsPool superClass
+    thisCls <- convertClassName constsPool thisClass
+    attrs <- attributesFile2Direct pool classAttributes
+    ifcs <- traverse (convertClassName constsPool) interfaces
+    cflds <- traverse (fieldFile2Direct pool) classFields
+    cmthds <- traverse (methodFile2Direct pool) classMethods
+    pure $ ClassDirect $ Class $ 
+      { magic 
+      , minorVersion
+      , majorVersion
+      , constsPoolSize : Word16 $ fromInt $ M.size pool
+      , constsPool : pool
+      , accessFlags : toMask $ toInt $ unwrap accessFlags
+      , thisClass : thisCls
+      , superClass : superName
+      , interfacesCount
+      , interfaces : ifcs
+      , classFieldsCount
+      , classFields : cflds
+      , classMethodsCount
+      , classMethods : cmthds
+      , classAttributesCount
+      , classAttributes : attrs }

@@ -85,7 +85,7 @@ showMethod (Tuple nm (Code {codeInstructions})) = do
 
 main :: Effect Unit
 main = launchAff_ $ do
-  buff <- ND.readFile $ concat [".", "test", "resources", "Rectangle$Point.class"]
+  buff <- ND.readFile $ concat [".", "test", "resources", "testclasses", "Class1.class"]
   ab <- liftEffect $ ND.toArrayBuffer buff
   (clss :: ClassFile) <- liftEffect $ decodeFull get ab
   let clssDirRes = classFile2Direct clss

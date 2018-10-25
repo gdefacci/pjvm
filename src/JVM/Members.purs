@@ -59,12 +59,9 @@ instance showReturnSignature :: Show ReturnSignature where
   show (Returns t) = show t
   show ReturnsVoid = "Void"
 
--- | Method argument signature
-type ArgumentSignature = FieldType
-
 -- | Class method argument signature
 data MethodSignature =
-    MethodSignature (Array ArgumentSignature) ReturnSignature
+    MethodSignature (Array FieldType) ReturnSignature
   --deriving (Eq, Ord)
 
 derive instance eqMethodSignature :: Eq MethodSignature

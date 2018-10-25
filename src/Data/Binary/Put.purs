@@ -14,6 +14,7 @@ import Data.Int.Bits (shr, (.&.), (.|.))
 import Data.Maybe (Maybe(..))
 import Data.UInt (UInt, fromInt)
 import Effect (Effect)
+import Effect.Class (class MonadEffect, liftEffect)
 import Effect.Exception (throw)
 import Effect.Unsafe (unsafePerformEffect)
 
@@ -35,12 +36,12 @@ fromSetter sz setter a = Put $ \ofst -> { newOffset : ofst + sz, effect : \dv ->
 putFail :: (ByteOffset -> String) -> Put
 putFail msg = Put $ \ofst -> { newOffset : ofst + 0, effect : \_ -> throw $ msg ofst }
 
-runPut :: Put -> Effect ArrayBuffer
+runPut :: forall m. MonadEffect m => Put -> m ArrayBuffer
 runPut (Put f) = do
   let {newOffset : totLen, effect } = f 0
-  buff <- create totLen
+  buff <- liftEffect $ create totLen
   let dv = whole buff
-  wlen <- effect dv
+  wlen <- liftEffect $ effect dv
   pure $ buff
 
 putN :: forall a. (a -> Put) -> (ByteOffset -> ByteOffset) -> a -> Put

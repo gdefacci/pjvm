@@ -2,13 +2,17 @@ module JVM.Instruction where
 
 import Prelude
 
-import Data.Binary.Types (Word16, Word32, Word8(..))
-
+import Control.Monad.Error.Class (class MonadThrow)
+import Control.Monad.State (class MonadState)
 import Data.Array as A
 import Data.Binary.Binary (class Binary, putFoldable, get, put, putPad)
-import Data.Binary.Decoder (Decoder, ParserError(..), fail, getOffset, skip)
+import Data.Binary.Decoder (Decoder, ParserError(..), ParserState, fail, getOffset, skip)
 import Data.Binary.Put (Put, putFail)
+import Data.Binary.Types (Word16, Word32, Word8(..))
+import Data.Enum (class BoundedEnum, class Enum, Cardinality, cardinality, defaultFromEnum, defaultToEnum)
 import Data.Generic.Rep (class Generic)
+import Data.Generic.Rep.Bounded (genericBottom, genericTop)
+import Data.Generic.Rep.Enum (genericCardinality, genericFromEnum, genericPred, genericSucc, genericToEnum)
 import Data.Generic.Rep.Show (genericShow)
 import Data.List.Lazy (replicateM)
 import Data.Maybe (Maybe(..))
@@ -22,27 +26,6 @@ data IMM =
   | I2     -- ^ 2
   | I3     -- ^ 3
 
-derive instance eqIMM :: Eq IMM
-derive instance ordIMM :: Ord IMM
-
-derive instance genericIMM :: Generic IMM _
-
-instance showIMM :: Show IMM where
-  show = genericShow
-
-immOrdValue :: IMM -> Int
-immOrdValue I0 = 0
-immOrdValue I1 = 1
-immOrdValue I2 = 2
-immOrdValue I3 = 3
-
-toIMMEnum :: Int -> Maybe IMM
-toIMMEnum 0 = Just I0
-toIMMEnum 1 = Just I1
-toIMMEnum 2 = Just I2
-toIMMEnum 3 = Just I3
-toIMMEnum _ = Nothing
-
   -- | Comparation operation type. Not all CMP instructions support all operations.
 data CMP =
     C_EQ
@@ -52,332 +35,79 @@ data CMP =
   | C_GT
   | C_LE
 
-derive instance eqCMP :: Eq CMP
-derive instance ordCMP :: Ord CMP
+data ILFD = ILFD_I | ILFD_L | ILFD_F | ILFD_D
+data ILFDA = ILFDA_I | ILFDA_L | ILFDA_F | ILFDA_D | ILFDA_A
+data T32 = T32_I | T32_F
+data JTA = JTA_I | JTA_L | JTA_F | JTA_D | JTA_A | JTA_B | JTA_C | JTA_S
+data JT  = JT_I | JT_L | JT_F | JT_D | JT_B | JT_C | JT_S
+data IL = IL_I | IL_L
 
-derive instance genericCMP :: Generic CMP _
+data StackOperation = Pop | Pop2 | Dup | Dup_x1 | Dup_x2 | Dup2 | Dup2_x1 | Dup2_x2 | Swap
+data NumOperation = Add | Sub | Mul | Div | Rem | Neg
+data BitOperation = Shl | Shr | Ushr | And | Or | Xor
 
-instance showCMP :: Show CMP where
-  show = genericShow
-
-cmpOrd :: CMP -> Int
-cmpOrd C_EQ = 0
-cmpOrd C_NE = 1
-cmpOrd C_LT = 2
-cmpOrd C_GE = 3
-cmpOrd C_GT = 4
-cmpOrd C_LE = 5
-
-toCmp :: Int -> Decoder CMP
-toCmp 1 = pure C_NE
-toCmp 0 = pure C_EQ
-toCmp 2 = pure C_LT
-toCmp 3 = pure C_GE
-toCmp 4 = pure C_GT
-toCmp 5 = pure C_LE
-toCmp c = fail $ \offset -> GenericParserError { offset, message: "Unknown instruction byte code: " <> show c}
-
-data MathOp = ADD | SUB | MUL | DIV | REM | NEG
-data JNumType = MT_I | MT_L | MT_F | MT_D
-
-mathTypeOrd :: JNumType -> Int
-mathTypeOrd MT_I = 0
-mathTypeOrd MT_L = 1
-mathTypeOrd MT_F = 2
-mathTypeOrd MT_D = 3
-
-mathOpOrd :: MathOp -> Int
-mathOpOrd ADD = 96
-mathOpOrd SUB = 100
-mathOpOrd MUL = 104
-mathOpOrd DIV = 108
-mathOpOrd REM = 112
-mathOpOrd NEG = 116
-
-mathInstrOrd :: MathOp -> JNumType -> Int
-mathInstrOrd op typ = (mathOpOrd op) + (mathTypeOrd typ)
-
-mathInstruction :: Int -> Decoder Instruction
-mathInstruction cd = 
-  let code = cd - (mathOpOrd ADD)
-      tp = code `mod` 4
-  in do
-      op <- mathOpFromOrd cd code
-      typ <- mathTypeFromOrd cd tp
-      pure $ MATH op typ
-  where
-    mathOpFromOrd :: Int -> Int -> Decoder MathOp
-    mathOpFromOrd _ x | x >= 96  && x < 100 = pure ADD  
-    mathOpFromOrd _ x | x >= 100 && x < 104 = pure SUB 
-    mathOpFromOrd _ x | x >= 104 && x < 108 = pure MUL 
-    mathOpFromOrd _ x | x >= 108 && x < 112 = pure DIV 
-    mathOpFromOrd _ x | x >= 112 && x < 116 = pure REM 
-    mathOpFromOrd _ x | x >= 116 && x < 120 = pure NEG 
-    mathOpFromOrd ch _ = fail $ \offset -> GenericParserError { offset, message: "Unknown instruction byte code: " <> show ch}
-
-    mathTypeFromOrd :: Int -> Int -> Decoder JNumType 
-    mathTypeFromOrd _ 0 = pure MT_I 
-    mathTypeFromOrd _ 1 = pure MT_L 
-    mathTypeFromOrd _ 2 = pure MT_F 
-    mathTypeFromOrd _ 3 = pure MT_D
-    mathTypeFromOrd ch _ = fail $ \offset -> GenericParserError { offset, message: "Unknown instruction byte code: " <> show ch}
-
-derive instance eqMathOp :: Eq MathOp
-derive instance ordMathOp :: Ord MathOp
-
-derive instance genericMathOp :: Generic MathOp _
-
-instance showMathOp :: Show MathOp where
-  show = genericShow
-
-derive instance eqJNumType :: Eq JNumType
-derive instance ordJNumType :: Ord JNumType
-
-derive instance genericJNumType :: Generic JNumType _
-
-instance showJNumType :: Show JNumType where
-  show = genericShow
-
-data MemOpType = LT_I | LT_L | LT_F | LT_D | LT_A
-
-data MemOp =  LOAD MemOpType Word8
-                | LOAD_IMM MemOpType IMM
-                | ALOAD MemOpType
-                | BALOAD
-                | CALOAD
-                | SALOAD
-                | STORE MemOpType Word8
-                | STORE_IMM MemOpType IMM
-                | ASTORE MemOpType 
-                | BASTORE        
-                | CASTORE        
-                | SASTORE        
-
-derive instance eqMemOpType :: Eq MemOpType
-derive instance ordMemOpType :: Ord MemOpType
-
-derive instance genericMemOpType :: Generic MemOpType _
-
-instance showMemOpType :: Show MemOpType where
-  show = genericShow
-
-derive instance eqMemOp :: Eq MemOp
-derive instance ordMemOp :: Ord MemOp
-
-derive instance genericMemOp :: Generic MemOp _
-
-instance showMemOp :: Show MemOp where
-  show = genericShow
-
-memTypeOrd :: MemOpType -> Int
-memTypeOrd LT_I = 0
-memTypeOrd LT_L = 1
-memTypeOrd LT_F = 2
-memTypeOrd LT_D = 3
-memTypeOrd LT_A = 4
-
-putMemOp :: MemOp -> Put
-putMemOp (LOAD lt w8        ) = put1 (21 + (memTypeOrd lt)) w8
-putMemOp (LOAD_IMM lt i   ) = putImm (26 + ((memTypeOrd lt) * 4)) i
-putMemOp (ALOAD lt          ) = putWord8 (46 + (memTypeOrd lt))
-putMemOp (BALOAD            ) = putWord8 51
-putMemOp (CALOAD            ) = putWord8 52
-putMemOp (SALOAD            ) = putWord8 53
-putMemOp (STORE lt w8       ) = put1 (54 + (memTypeOrd lt)) w8
-putMemOp (STORE_IMM lt i  ) = putImm (59 + ((memTypeOrd lt) * 4)) i
-putMemOp (ASTORE lt         ) = putWord8 (79 + (memTypeOrd lt))
-putMemOp (BASTORE           ) = putWord8 84
-putMemOp (CASTORE           ) = putWord8 85
-putMemOp (SASTORE           ) = putWord8 86
-
-getMemOp :: Int -> Decoder MemOp
-getMemOp 21 = (LOAD LT_I) <$> get
-getMemOp 22 = (LOAD LT_L) <$> get
-getMemOp 23 = (LOAD LT_F) <$> get
-getMemOp 24 = (LOAD LT_D) <$> get
-getMemOp 25 = (LOAD LT_A) <$> get
-getMemOp 47 = pure $ ALOAD $ LT_L
-getMemOp 46 = pure $ ALOAD $ LT_I
-getMemOp 48 = pure $ ALOAD $ LT_F
-getMemOp 49 = pure $ ALOAD $ LT_D
-getMemOp 50 = pure $ ALOAD $ LT_A
-getMemOp 51 = pure $ BALOAD
-getMemOp 52 = pure $ CALOAD
-getMemOp 53 = pure $ SALOAD
-getMemOp 54 = (STORE LT_I) <$> get
-getMemOp 55 = (STORE LT_L) <$> get
-getMemOp 56 = (STORE LT_F) <$> get
-getMemOp 57 = (STORE LT_D) <$> get
-getMemOp 58 = (STORE LT_A) <$> get
-getMemOp 79 = pure $ ASTORE LT_I
-getMemOp 80 = pure $ ASTORE LT_L
-getMemOp 81 = pure $ ASTORE LT_F
-getMemOp 82 = pure $ ASTORE LT_D
-getMemOp 83 = pure $ ASTORE LT_A
-getMemOp 84 = pure BASTORE
-getMemOp 85 = pure CASTORE
-getMemOp 86 = pure SASTORE
-getMemOp c  | inRange 59 62 c = imm 59 (STORE_IMM LT_I) c
-              | inRange 63 66 c = imm 63 (STORE_IMM LT_L) c
-              | inRange 67 70 c = imm 67 (STORE_IMM LT_F) c
-              | inRange 71 74 c = imm 71 (STORE_IMM LT_D) c
-              | inRange 75 78 c = imm 75 (STORE_IMM LT_A) c
-              | inRange 26 29 c = imm 26 (LOAD_IMM LT_I) c
-              | inRange 30 33 c = imm 30 (LOAD_IMM LT_L) c
-              | inRange 34 37 c = imm 34 (LOAD_IMM LT_F) c
-              | inRange 38 41 c = imm 38 (LOAD_IMM LT_D) c
-              | inRange 42 45 c = imm 42 (LOAD_IMM LT_A) c
-              | otherwise       = fail $ \offset -> GenericParserError { offset, message: "Unknown instruction byte code: " <> show c}
-
-data ConstOp = 
-    ACONST_NULL             
-  | CONST_M1                
-  | CONST_0 JNumType        
-  | CONST_1 JNumType        
-  | ICONST_2                
-  | ICONST_3                
-  | ICONST_4                
-  | ICONST_5                
-  | FCONST_2                
-  
-constOpOrd :: ConstOp -> Int
-constOpOrd ACONST_NULL   = 1
-constOpOrd CONST_M1      = 2
-constOpOrd (CONST_0 MT_I)  = 3
-constOpOrd (CONST_1 MT_I)  = 4
-constOpOrd ICONST_2      = 5
-constOpOrd ICONST_3      = 6
-constOpOrd ICONST_4      = 7
-constOpOrd ICONST_5      = 8
-constOpOrd FCONST_2      = 13
-constOpOrd (CONST_0 MT_L)  = 9
-constOpOrd (CONST_1 MT_L)  = 10
-constOpOrd (CONST_0 MT_F)  = 11
-constOpOrd (CONST_1 MT_F)  = 12
-constOpOrd (CONST_0 MT_D)  = 14
-constOpOrd (CONST_1 MT_D)  = 15
-
-constOpFromOrd :: Int -> Decoder ConstOp
-constOpFromOrd 1  = pure $ ACONST_NULL  
-constOpFromOrd 2  = pure $ CONST_M1     
-constOpFromOrd 3  = pure $ CONST_0 MT_I 
-constOpFromOrd 4  = pure $ CONST_1 MT_I 
-constOpFromOrd 5  = pure $ ICONST_2     
-constOpFromOrd 6  = pure $ ICONST_3     
-constOpFromOrd 7  = pure $ ICONST_4     
-constOpFromOrd 8  = pure $ ICONST_5     
-constOpFromOrd 13 = pure $ FCONST_2     
-constOpFromOrd 9  = pure $ CONST_0 MT_L 
-constOpFromOrd 10 = pure $ CONST_1 MT_L 
-constOpFromOrd 11 = pure $ CONST_0 MT_F 
-constOpFromOrd 12 = pure $ CONST_1 MT_F 
-constOpFromOrd 14 = pure $ CONST_0 MT_D 
-constOpFromOrd 15 = pure $ CONST_1 MT_D 
-constOpFromOrd c  = fail $ \offset -> GenericParserError { offset, message: "Unknown instruction byte code: " <> show c}
-
-derive instance eqConstOp :: Eq ConstOp
-derive instance ordConstOp :: Ord ConstOp
-
-derive instance genericConstOp :: Generic ConstOp _
-
-instance showConstOp :: Show ConstOp where
-  show = genericShow
-
--- | JVM instruction set. For comments, see JVM specification.
 data Instruction =
-    NOP            -- ^ 0
-  | CONST ConstOp
-  | BIPUSH Word8   -- ^ 16
-  | SIPUSH Word16  -- ^ 17
-  | LDC1 Word8     -- ^ 18
-  | LDC2 Word16    -- ^ 19
-  | LDC2W Word16   -- ^ 20
-  | MEM MemOp
-  | POP            -- ^ 87
-  | POP2           -- ^ 88
-  | DUP            -- ^ 89
-  | DUP_X1         -- ^ 90
-  | DUP_X2         -- ^ 91
-  | DUP2           -- ^ 92
-  | DUP2_X1        -- ^ 93
-  | DUP2_X2        -- ^ 94
-  | SWAP           -- ^ 95
-  | MATH MathOp JNumType -- (96..119)
-  | ISHL           -- ^ 120
-  | LSHL           -- ^ 121
-  | ISHR           -- ^ 122
-  | LSHR           -- ^ 123
-  | IUSHR          -- ^ 124
-  | LUSHR          -- ^ 125
-  | IAND           -- ^ 126
-  | LAND           -- ^ 127
-  | IOR            -- ^ 128
-  | LOR            -- ^ 129
-  | IXOR           -- ^ 130
-  | LXOR           -- ^ 131
-  | IINC Word8 Word8       -- ^ 132
-  | I2L                    -- ^ 133
-  | I2F                    -- ^ 134
-  | I2D                    -- ^ 135
-  | L2I                    -- ^ 136
-  | L2F                    -- ^ 137
-  | L2D                    -- ^ 138
-  | F2I                    -- ^ 139
-  | F2L                    -- ^ 140
-  | F2D                    -- ^ 141
-  | D2I                    -- ^ 142
-  | D2L                    -- ^ 143
-  | D2F                    -- ^ 144
-  | I2B                    -- ^ 145
-  | I2C                    -- ^ 146
-  | I2S                    -- ^ 147
-  | LCMP                   -- ^ 148
-  | FCMP CMP               -- ^ 149, 150
-  | DCMP CMP               -- ^ 151, 152
-  | IF CMP Word16          -- ^ 153, 154, 155, 156, 157, 158
-  | IF_ICMP CMP Word16     -- ^ 159, 160, 161, 162, 163, 164
-  | IF_ACMP CMP Word16     -- ^ 165, 166
-  | GOTO Word16            -- ^ 167
-  | JSR Word16             -- ^ 168
-  | RET                    -- ^ 169
-  | TABLESWITCH Word8 Word32 Word32 Word32 (Array Word32)     -- ^ 170
-  | LOOKUPSWITCH Word8 Word32 Word32 (Array (Tuple Word32 Word32)) -- ^ 171
-  | IRETURN                -- ^ 172
-  | LRETURN                -- ^ 173
-  | FRETURN                -- ^ 174
-  | DRETURN                -- ^ 175
-  | ARETURN                -- ^ 176
-  | RETURN                 -- ^ 177
-  | GETSTATIC Word16       -- ^ 178
-  | PUTSTATIC Word16       -- ^ 179
-  | GETFIELD Word16        -- ^ 180
-  | PUTFIELD Word16        -- ^ 181
-  | INVOKEVIRTUAL Word16   -- ^ 182
-  | INVOKESPECIAL Word16   -- ^ 183
-  | INVOKESTATIC Word16    -- ^ 184
-  | INVOKEINTERFACE Word16 Word8 -- ^ 185
-  | NEW Word16             -- ^ 187
-  | NEWARRAY Word8         -- ^ 188, see @ArrayType@
-  | ANEWARRAY Word16       -- ^ 189
-  | ARRAYLENGTH            -- ^ 190
-  | ATHROW                 -- ^ 191
-  | CHECKCAST Word16       -- ^ 192
-  | INSTANCEOF Word16      -- ^ 193
-  | MONITORENTER           -- ^ 194
-  | MONITOREXIT            -- ^ 195
-  | WIDE Word8 Instruction -- ^ 196
-  | MULTINANEWARRAY Word16 Word8 -- ^ 197
-  | IFNULL Word16          -- ^ 198
-  | IFNONNULL Word16       -- ^ 199
-  | GOTO_W Word32          -- ^ 200
-  | JSR_W Word32           -- ^ 201
-
-derive instance eqInstruction :: Eq Instruction
-
-derive instance genericInstruction :: Generic Instruction _
-
-instance showIstr :: Show Instruction where
-  show instr = genericShow instr
+    NOP
+  | ACONST_NULL
+  | ICONST_M1
+  | CONST_0 ILFD
+  | CONST_1 ILFD
+  | CONST_2 T32
+  | ICONST_3
+  | ICONST_4
+  | ICONST_5
+  | BIPUSH Word8
+  | SIPUSH Word16
+  | LDC1 Word8
+  | LDC2 Word16
+  | LDC2W Word16
+  | LOAD ILFDA Word8
+  | LOAD_ ILFDA IMM
+  | ALOAD JTA
+  | STORE ILFDA Word8
+  | STORE_ ILFDA IMM
+  | ASTORE JTA
+  | STACK_OP StackOperation
+  | NUM_OP NumOperation ILFD
+  | BIT_OP BitOperation IL
+  | IINC Word8 Word8
+  | CONVERT ILFD JT
+  | LCMP
+  | FCMP CMP
+  | DCMP CMP
+  | IF CMP Word16
+  | IF_ICMP CMP Word16
+  | IF_ACMP CMP Word16
+  | GOTO Word16
+  | JSR Word16
+  | RET
+  | TABLESWITCH Word8 Word32 Word32 Word32 (Array Word32)
+  | LOOKUPSWITCH Word8 Word32 Word32 (Array (Tuple Word32 Word32))
+  | RET_ ILFDA
+  | RETURN
+  | GETSTATIC Word16
+  | PUTSTATIC Word16
+  | GETFIELD Word16
+  | PUTFIELD Word16
+  | INVOKEVIRTUAL Word16
+  | INVOKESPECIAL Word16
+  | INVOKESTATIC Word16
+  | INVOKEINTERFACE Word16 Word8
+  | NEW Word16
+  | NEWARRAY Word8
+  | ANEWARRAY Word16
+  | ARRAYLENGTH
+  | ATHROW
+  | CHECKCAST Word16
+  | INSTANCEOF Word16
+  | MONITORENTER
+  | MONITOREXIT
+  | WIDE Word8 Instruction
+  | MULTINANEWARRAY Word16 Word8
+  | IFNULL Word16
+  | IFNONNULL Word16
+  | GOTO_W Word32
+  | JSR_W Word32
 
 -- | JVM array type (primitive types)
 data ArrayType =
@@ -391,12 +121,17 @@ data ArrayType =
   | T_LONG     -- ^ 11
   -- deriving (Eq, Show, Enum)
 
-derive instance eqArrayType :: Eq ArrayType
-
-derive instance genericArrayType :: Generic ArrayType _
-
-instance showArrayType :: Show ArrayType where
-  show = genericShow
+decodeEnum :: forall m a. Bounded a
+                      => Enum a
+                      => MonadThrow ParserError m
+                      => MonadState ParserState m
+                      => String
+                      -> Int
+                      -> m a
+decodeEnum desc v =
+  case defaultToEnum v of
+    Nothing -> fail $ \offset -> GenericParserError { offset, message: "Cant convert to " <> desc <> " byte: " <> show v}
+    (Just r) -> pure r
 
 -- | Parse opcode with immediate constant
 imm :: forall a. Int                   -- ^ Base opcode
@@ -404,17 +139,20 @@ imm :: forall a. Int                   -- ^ Base opcode
     -> Int                   -- ^ Opcode to parse
     -> Decoder a
 imm base constr x =
-  let immValue = x - base
-  in case toIMMEnum immValue of
-    Nothing -> fail $ \offset -> GenericParserError { offset, message: "Unknown IMM byte: " <> show immValue}
-    (Just r) -> pure $ constr r
-  -- pure $ constr $ toEnum $ fromIntegral (x-base)
+  constr <$> decodeEnum "IMM" (x - base)
 
 -- | Put opcode with immediate constant
-putImm :: Int                  -- ^ Base opcode
-       -> IMM                  -- ^ Constant to add to opcode
-       -> Put
-putImm base i = putWord8 $ base + (immOrdValue i)
+putImm :: forall t. Bounded t
+        => Enum t
+        => Int                  -- ^ Base opcode
+        -> t
+        -> IMM                  -- ^ Constant to add to opcode
+        -> Put
+putImm base t i =
+  let sizeOfIMM = unwrap (cardinality :: Cardinality IMM)
+      tord = defaultFromEnum t
+      tdelta =  tord * sizeOfIMM
+  in putByte $ base + tdelta + (defaultFromEnum i)
 
 atype2byte :: ArrayType -> Word8
 atype2byte T_BOOLEAN  = Word8 $ fromInt 4
@@ -450,6 +188,17 @@ instance binaryArrayType :: Binary ArrayType where
   put t = put (atype2byte t)
 
 -- | Put opcode with one argument
+put1t :: forall a t. (Binary a)
+        => Bounded t
+        => Enum t
+        => Int                    -- ^ Opcode
+        -> t
+        -> a                      -- ^ First argument
+        -> Put
+put1t code t x =
+  put (Word8 $ fromInt (code + (defaultFromEnum t))) <>
+  put x
+
 put1 :: forall a. (Binary a)
       => Int                    -- ^ Opcode
       -> a                      -- ^ First argument
@@ -469,92 +218,118 @@ put2 code x y =
   put x <>
   put y
 
-putWord8 :: Int -> Put
-putWord8 i = put $ Word8 $ fromInt i
+putByte :: Int -> Put
+putByte i = put $ Word8 $ fromInt i
+
+--NumOperation ILFD
+putOp :: forall op t. Enum op => Enum t => BoundedEnum t => Int -> op -> t -> Put
+putOp base op t =
+  let ifldSize = unwrap $ (cardinality :: Cardinality t)
+  in putByte (base + ((defaultFromEnum op) * ifldSize) + (defaultFromEnum t))
+
 
 instance binaryInstruction :: Binary Instruction where
-  put  NOP         = putWord8 0
-  put (CONST cp)  = putWord8 $ constOpOrd cp
+  put  NOP         = putByte 0
+  put  ACONST_NULL = putByte 1
+  put  ICONST_M1   = putByte 2
+
+  put  (CONST_0 ILFD_I)   = putByte 3
+  put  (CONST_1 ILFD_I)   = putByte 4
+  put  (CONST_2 T32_I)    = putByte 5
+  put  ICONST_3           = putByte 6
+  put  ICONST_4           = putByte 7
+  put  ICONST_5           = putByte 8
+  put  (CONST_2 T32_F)    = putByte 9
+  put  (CONST_0 ILFD_L)   = putByte 10
+  put  (CONST_1 ILFD_L)   = putByte 11
+  put  (CONST_0 ILFD_F)   = putByte 12
+  put  (CONST_1 ILFD_F)   = putByte 13
+  put  (CONST_0 ILFD_D)   = putByte 14
+  put  (CONST_1 ILFD_D)   = putByte 15
+
   put (BIPUSH x)   = put1 16 x
   put (SIPUSH x)   = put1 17 x
   put (LDC1 x)     = put1 18 x
   put (LDC2 x)     = put1 19 x
   put (LDC2W x)    = put1 20 x
-  put (MEM lop)  = putMemOp lop
-  put  POP         = putWord8 87
-  put  POP2        = putWord8 88
-  put  DUP         = putWord8 89
-  put  DUP_X1      = putWord8 90
-  put  DUP_X2      = putWord8 91
-  put  DUP2        = putWord8 92
-  put  DUP2_X1     = putWord8 93
-  put  DUP2_X2     = putWord8 94
-  put  SWAP        = putWord8 95
-  put  (MATH op t) = putWord8 (mathInstrOrd op t)
-  put  ISHL        = putWord8 120
-  put  LSHL        = putWord8 121
-  put  ISHR        = putWord8 122
-  put  LSHR        = putWord8 123
-  put  IUSHR       = putWord8 124
-  put  LUSHR       = putWord8 125
-  put  IAND        = putWord8 126
-  put  LAND        = putWord8 127
-  put  IOR         = putWord8 128
-  put  LOR         = putWord8 129
-  put  IXOR        = putWord8 130
-  put  LXOR        = putWord8 131
+
+  put (LOAD t x)    = put1t 21 t x
+
+  put (LOAD_ t i)   = putImm 26 t i
+
+  put  (ALOAD t)     = putByte $ 46 + (defaultFromEnum t)
+
+  put (STORE t x)   = put1t 54 t x
+
+  put (STORE_ t i)   = putImm 59 t i
+
+  put (ASTORE t)   = putByte $ 79 + (defaultFromEnum t)
+
+  put  (STACK_OP Pop     ) = putByte 87
+  put  (STACK_OP Pop2    ) = putByte 88
+  put  (STACK_OP Dup     ) = putByte 89
+  put  (STACK_OP Dup_x1  ) = putByte 90
+  put  (STACK_OP Dup_x2  ) = putByte 91
+  put  (STACK_OP Dup2    ) = putByte 92
+  put  (STACK_OP Dup2_x1 ) = putByte 93
+  put  (STACK_OP Dup2_x2 ) = putByte 94
+  put  (STACK_OP Swap    ) = putByte 95
+
+  put  (NUM_OP op t) = putOp 96 op t
+
+  put  (BIT_OP op t) = putOp 120 op t
+
   put (IINC x y)      = put2 132 x y
-  put  I2L            = putWord8 133
-  put  I2F            = putWord8 134
-  put  I2D            = putWord8 135
-  put  L2I            = putWord8 136
-  put  L2F            = putWord8 137
-  put  L2D            = putWord8 138
-  put  F2I            = putWord8 139
-  put  F2L            = putWord8 140
-  put  F2D            = putWord8 141
-  put  D2I            = putWord8 142
-  put  D2L            = putWord8 143
-  put  D2F            = putWord8 144
-  put  I2B            = putWord8 145
-  put  I2C            = putWord8 146
-  put  I2S            = putWord8 147
-  put  LCMP           = putWord8 148
-  put (FCMP C_LT)     = putWord8 149
-  put (FCMP C_GT)     = putWord8 150
+
+  -- CONVERT ILFD JT
+  put  (CONVERT ILFD_I JT_L) = putByte 133
+  put  (CONVERT ILFD_I JT_F) = putByte 134
+  put  (CONVERT ILFD_I JT_D) = putByte 135
+  put  (CONVERT ILFD_L JT_I) = putByte 136
+  put  (CONVERT ILFD_L JT_F) = putByte 137
+  put  (CONVERT ILFD_L JT_D) = putByte 138
+  put  (CONVERT ILFD_F JT_I) = putByte 139
+  put  (CONVERT ILFD_F JT_L) = putByte 140
+  put  (CONVERT ILFD_F JT_D) = putByte 141
+  put  (CONVERT ILFD_D JT_I) = putByte 142
+  put  (CONVERT ILFD_D JT_L) = putByte 143
+  put  (CONVERT ILFD_D JT_F) = putByte 144
+  put  (CONVERT ILFD_I JT_B) = putByte 145
+  put  (CONVERT ILFD_I JT_C) = putByte 146
+  put  (CONVERT ILFD_I JT_S) = putByte 147
+  put  c @ (CONVERT _ _) = putFail $ \_ -> "No such instruction: Conversion " <> show c
+
+  put  LCMP           = putByte 148
+  put (FCMP C_LT)     = putByte 149
+  put (FCMP C_GT)     = putByte 150
   put (FCMP c)        = putFail $ \_ -> "No such instruction: FCMP " <> show c
-  put (DCMP C_LT)     = putWord8 151
-  put (DCMP C_GT)     = putWord8 152
+  put (DCMP C_LT)     = putByte 151
+  put (DCMP C_GT)     = putByte 152
   put (DCMP c)        = putFail $ \_ -> "No such instruction: DCMP " <> show c
-  put (IF c x)        = put (Word8 $ fromInt $ 153 + (cmpOrd c)) <>
-                        put x
+  put (IF c x)        = putByte (153 + (defaultFromEnum c)) <> put x
   put (IF_ACMP C_EQ x) = put1 165 x
   put (IF_ACMP C_NE x) = put1 166 x
   put (IF_ACMP c _)   = putFail $ \_ -> "No such instruction: IF_ACMP " <> show c
-  put (IF_ICMP c x)   = put (Word8 $ fromInt $ 159 + (cmpOrd c)) <>
-                        put x
+  put (IF_ICMP c x)   = putByte (159 + (defaultFromEnum c)) <> put x
   put (GOTO x)        = put1 167 x
   put (JSR x)         = put1 168 x
-  put  RET            = putWord8 169
+  put  RET            = putByte 169
   put (TABLESWITCH _ def low high offs) =
-                                   put (Word8 $ fromInt 170) <>
-                                   putPad padding (Word8 $ fromInt 0) <>
-                                   put low <>
-                                   put high <>
-                                   putFoldable offs
+    put (Word8 $ fromInt 170) <>
+    putPad padding (Word8 $ fromInt 0) <>
+    put low <>
+    put high <>
+    putFoldable offs
   put (LOOKUPSWITCH _ def n pairs) =
-                                   put (Word8 $ fromInt 171) <>
-                                   putPad padding (Word8 $ fromInt 0) <>
-                                   put def <>
-                                   put n <>
-                                   putFoldable pairs
+    put (Word8 $ fromInt 171) <>
+    putPad padding (Word8 $ fromInt 0) <>
+    put def <>
+    put n <>
+    putFoldable pairs
 
-  put  IRETURN        = putWord8 172
-  put  LRETURN        = putWord8 173
-  put  FRETURN        = putWord8 174
-  put  DRETURN        = putWord8 175
-  put  ARETURN        = putWord8 176
-  put  RETURN         = putWord8 177
+  put (RET_ t)        = putByte $ 172 + (defaultFromEnum t)
+
+  put  RETURN         = putByte 177
   put (GETSTATIC x)   = put1 178 x
   put (PUTSTATIC x)   = put1 179 x
   put (GETFIELD x)    = put1 180 x
@@ -562,18 +337,16 @@ instance binaryInstruction :: Binary Instruction where
   put (INVOKEVIRTUAL x)     = put1 182 x
   put (INVOKESPECIAL x)     = put1 183 x
   put (INVOKESTATIC x)      = put1 184 x
-  put (INVOKEINTERFACE x c) = put2 185 x c <>
-                              put (Word8 $ fromInt 0)
-
+  put (INVOKEINTERFACE x c) = put2 185 x c <> putByte 0
   put (NEW x)         = put1 187 x
   put (NEWARRAY x)    = put1 188 x
   put (ANEWARRAY x)   = put1 189 x
-  put  ARRAYLENGTH    = putWord8 190
-  put  ATHROW         = putWord8 191
+  put  ARRAYLENGTH    = putByte 190
+  put  ATHROW         = putByte 191
   put (CHECKCAST x)   = put1 192 x
   put (INSTANCEOF x)  = put1 193 x
-  put  MONITORENTER   = putWord8 194
-  put  MONITOREXIT    = putWord8 195
+  put  MONITORENTER   = putByte 194
+  put  MONITOREXIT    = putByte 195
   put (WIDE x inst)   = put2 196 x inst
   put (MULTINANEWARRAY x y) = put2 197 x y
   put (IFNULL x)      = put1 198 x
@@ -586,49 +359,127 @@ instance binaryInstruction :: Binary Instruction where
     let c = toInt ch
     case c of
       0 -> pure NOP
+      1 -> pure ACONST_NULL
+      2 -> pure ICONST_M1
+
+      3  -> pure (CONST_0 ILFD_I)
+      4  -> pure (CONST_1 ILFD_I)
+      5  -> pure (CONST_2 T32_I)
+      6  -> pure ICONST_3
+      7  -> pure ICONST_4
+      8  -> pure ICONST_5
+      9  -> pure (CONST_2 T32_F)
+      10 -> pure (CONST_0 ILFD_L)
+      11 -> pure (CONST_1 ILFD_L)
+      12 -> pure (CONST_0 ILFD_F)
+      13 -> pure (CONST_1 ILFD_F)
+      14 -> pure (CONST_0 ILFD_D)
+      15 -> pure (CONST_1 ILFD_D)
+
       16 -> BIPUSH <$> get
       17 -> SIPUSH <$> get
       18 -> LDC1 <$> get
       19 -> LDC2 <$> get
       20 -> LDC2W <$> get
-      87 -> pure POP
-      88 -> pure POP2
-      89 -> pure DUP
-      90 -> pure DUP_X1
-      91 -> pure DUP_X2
-      92 -> pure DUP2
-      93 -> pure DUP2_X1
-      94 -> pure DUP2_X2
-      95 -> pure SWAP
-      120 -> pure ISHL
-      121 -> pure LSHL
-      122 -> pure ISHR
-      123 -> pure LSHR
-      124 -> pure IUSHR
-      125 -> pure LUSHR
-      126 -> pure IAND
-      127 -> pure LAND
-      128 -> pure IOR
-      129 -> pure LOR
-      130 -> pure IXOR
-      131 -> pure LXOR
+
+      21 -> (LOAD ILFDA_I) <$> get
+      22 -> (LOAD ILFDA_L) <$> get
+      23 -> (LOAD ILFDA_F) <$> get
+      24 -> (LOAD ILFDA_D) <$> get
+      25 -> (LOAD ILFDA_A) <$> get
+
+      46 -> pure $ ALOAD JTA_I
+      47 -> pure $ ALOAD JTA_L
+      48 -> pure $ ALOAD JTA_F
+      49 -> pure $ ALOAD JTA_D
+      50 -> pure $ ALOAD JTA_A
+      51 -> pure $ ALOAD JTA_B
+      52 -> pure $ ALOAD JTA_C
+      53 -> pure $ ALOAD JTA_S
+
+      54 -> (STORE ILFDA_I) <$> get
+      55 -> (STORE ILFDA_L) <$> get
+      56 -> (STORE ILFDA_F) <$> get
+      57 -> (STORE ILFDA_D) <$> get
+      58 -> (STORE ILFDA_A) <$> get
+
+      79 -> pure $ ASTORE JTA_I
+      80 -> pure $ ASTORE JTA_L
+      81 -> pure $ ASTORE JTA_F
+      82 -> pure $ ASTORE JTA_D
+      83 -> pure $ ASTORE JTA_A
+      84 -> pure $ ASTORE JTA_B
+      85 -> pure $ ASTORE JTA_C
+      86 -> pure $ ASTORE JTA_S
+
+      87 -> pure $ STACK_OP Pop
+      88 -> pure $ STACK_OP Pop2
+      89 -> pure $ STACK_OP Dup
+      90 -> pure $ STACK_OP Dup_x1
+      91 -> pure $ STACK_OP Dup_x2
+      92 -> pure $ STACK_OP Dup2
+      93 -> pure $ STACK_OP Dup2_x1
+      94 -> pure $ STACK_OP Dup2_x2
+      95 -> pure $ STACK_OP Swap
+
+      96  -> pure $ NUM_OP Add ILFD_I
+      97  -> pure $ NUM_OP Add ILFD_L
+      98  -> pure $ NUM_OP Add ILFD_F
+      99  -> pure $ NUM_OP Add ILFD_D
+      100 -> pure $ NUM_OP Sub ILFD_I
+      101 -> pure $ NUM_OP Sub ILFD_L
+      102 -> pure $ NUM_OP Sub ILFD_F
+      103 -> pure $ NUM_OP Sub ILFD_D
+      104 -> pure $ NUM_OP Mul ILFD_I
+      105 -> pure $ NUM_OP Mul ILFD_L
+      106 -> pure $ NUM_OP Mul ILFD_F
+      107 -> pure $ NUM_OP Mul ILFD_D
+      108 -> pure $ NUM_OP Div ILFD_I
+      109 -> pure $ NUM_OP Div ILFD_L
+      110 -> pure $ NUM_OP Div ILFD_F
+      111 -> pure $ NUM_OP Div ILFD_D
+      112 -> pure $ NUM_OP Rem ILFD_I
+      113 -> pure $ NUM_OP Rem ILFD_L
+      114 -> pure $ NUM_OP Rem ILFD_F
+      115 -> pure $ NUM_OP Rem ILFD_D
+      116 -> pure $ NUM_OP Neg ILFD_I
+      117 -> pure $ NUM_OP Neg ILFD_L
+      118 -> pure $ NUM_OP Neg ILFD_F
+      119 -> pure $ NUM_OP Neg ILFD_D
+
+      120 -> pure $ BIT_OP Shl  IL_I
+      121 -> pure $ BIT_OP Shl  IL_L
+      122 -> pure $ BIT_OP Shr  IL_I
+      123 -> pure $ BIT_OP Shr  IL_L
+      124 -> pure $ BIT_OP Ushr IL_I
+      125 -> pure $ BIT_OP Ushr IL_L
+      126 -> pure $ BIT_OP And  IL_I
+      127 -> pure $ BIT_OP And  IL_L
+      128 -> pure $ BIT_OP Or   IL_I
+      129 -> pure $ BIT_OP Or   IL_L
+      130 -> pure $ BIT_OP Xor  IL_I
+      131 -> pure $ BIT_OP Xor  IL_L
+
       132 -> IINC <$> get <*> get
-      133 -> pure I2L
-      134 -> pure I2F
-      135 -> pure I2D
-      136 -> pure L2I
-      137 -> pure L2F
-      138 -> pure L2D
-      139 -> pure F2I
-      140 -> pure F2L
-      141 -> pure F2D
-      142 -> pure D2I
-      143 -> pure D2L
-      144 -> pure D2F
-      145 -> pure I2B
-      146 -> pure I2C
-      147 -> pure I2S
+
+      133 -> pure $ CONVERT ILFD_I JT_L
+      134 -> pure $ CONVERT ILFD_I JT_F
+      135 -> pure $ CONVERT ILFD_I JT_D
+      136 -> pure $ CONVERT ILFD_L JT_I
+      137 -> pure $ CONVERT ILFD_L JT_F
+      138 -> pure $ CONVERT ILFD_L JT_D
+      139 -> pure $ CONVERT ILFD_F JT_I
+      140 -> pure $ CONVERT ILFD_F JT_L
+      141 -> pure $ CONVERT ILFD_F JT_D
+      142 -> pure $ CONVERT ILFD_D JT_I
+      143 -> pure $ CONVERT ILFD_D JT_L
+      144 -> pure $ CONVERT ILFD_D JT_F
+      145 -> pure $ CONVERT ILFD_I JT_B
+      146 -> pure $ CONVERT ILFD_I JT_C
+      147 -> pure $ CONVERT ILFD_I JT_S
+
       148 -> pure LCMP
+
       149 -> pure $ FCMP C_LT
       150 -> pure $ FCMP C_GT
       151 -> pure $ DCMP C_LT
@@ -655,11 +506,13 @@ instance binaryInstruction :: Binary Instruction where
              n <- get
              pairs <- A.fromFoldable <$> replicateM (toInt $ unwrap n) get
              pure $ LOOKUPSWITCH (Word8 $ fromInt pads) def n pairs
-      172 -> pure IRETURN
-      173 -> pure LRETURN
-      174 -> pure FRETURN
-      175 -> pure DRETURN
-      176 -> pure ARETURN
+
+      172 -> pure $ RET_ ILFDA_I
+      173 -> pure $ RET_ ILFDA_L
+      174 -> pure $ RET_ ILFDA_F
+      175 -> pure $ RET_ ILFDA_D
+      176 -> pure $ RET_ ILFDA_A
+
       177 -> pure RETURN
       178 -> GETSTATIC <$> get
       179 -> PUTSTATIC <$> get
@@ -684,14 +537,193 @@ instance binaryInstruction :: Binary Instruction where
       199 -> IFNONNULL <$> get
       200 -> GOTO_W <$> get
       201 -> JSR_W <$> get
-      _ | inRange 1 15 c -> CONST <$> (constOpFromOrd c)
-        | inRange 21 86 c -> MEM <$> (getMemOp c)
-        | inRange 96 119 c -> mathInstruction c
-        | inRange 153 158 c -> (\cmp -> IF cmp <$> get) =<< (toCmp $ c-153)
-        | inRange 159 164 c -> (\cmp -> IF_ICMP cmp <$> get) =<< (toCmp $ c-159)
+      _ | inRange 59 62 c  -> imm 59 (STORE_ ILFDA_I) c
+        | inRange 63 66 c  -> imm 63 (STORE_ ILFDA_L) c
+        | inRange 67 70 c  -> imm 67 (STORE_ ILFDA_F) c
+        | inRange 71 74 c  -> imm 71 (STORE_ ILFDA_D) c
+        | inRange 75 78 c  -> imm 75 (STORE_ ILFDA_A) c
+        | inRange 26 29 c  -> imm 26 (LOAD_ ILFDA_I)  c
+        | inRange 30 33 c  -> imm 30 (LOAD_ ILFDA_L)  c
+        | inRange 34 37 c  -> imm 34 (LOAD_ ILFDA_F)  c
+        | inRange 38 41 c  -> imm 38 (LOAD_ ILFDA_D)  c
+        | inRange 42 45 c  -> imm 42 (LOAD_ ILFDA_A)  c
+        | inRange 15 158 c -> IF <$> (decodeEnum "CMP" $ c- 153) <*> get
+        | inRange 15 164 c -> IF_ICMP <$> (decodeEnum "CMP" $ c- 159) <*> get
         | otherwise -> fail $ \offset -> GenericParserError { offset, message: "Unknown instruction byte code: " <> show c}
 
 -- | Calculate padding for current bytecode offset (cf. TABLESWITCH and LOOKUPSWITCH)
 -- padding :: (Integral a, Integral b) => a -> b
 padding :: Int -> Int
 padding offset = (4 - offset) `mod` 4
+
+
+derive instance eqIMM :: Eq IMM
+derive instance ordIMM :: Ord IMM
+
+derive instance genericIMM :: Generic IMM _
+
+instance showIMM :: Show IMM where
+  show = genericShow
+
+instance boundedIMM :: Bounded IMM where
+  top = genericTop
+  bottom = genericBottom
+
+instance enumIMM :: Enum IMM where
+  succ = genericSucc
+  pred = genericPred
+
+instance boundedEnumIMM :: BoundedEnum IMM where
+  cardinality = genericCardinality
+  toEnum = genericToEnum
+  fromEnum = genericFromEnum
+
+derive instance eqCMP :: Eq CMP
+derive instance ordCMP :: Ord CMP
+derive instance genericCMP :: Generic CMP _
+
+instance showCMP :: Show CMP where
+  show = genericShow
+
+instance boundedCMP :: Bounded CMP where
+  top = genericTop
+  bottom = genericBottom
+
+instance enumCMP :: Enum CMP where
+  succ = genericSucc
+  pred = genericPred
+
+derive instance eqILFD :: Eq ILFD
+derive instance ordILFD :: Ord ILFD
+derive instance genericILFD :: Generic ILFD _
+
+instance showILFD :: Show ILFD where
+  show = genericShow
+
+instance boundedILFD :: Bounded ILFD where
+  top = genericTop
+  bottom = genericBottom
+
+instance enumILFD :: Enum ILFD where
+  succ = genericSucc
+  pred = genericPred
+
+instance boundedEnumILFD :: BoundedEnum ILFD where
+  cardinality = genericCardinality
+  toEnum = genericToEnum
+  fromEnum = genericFromEnum
+
+derive instance eqILFDA :: Eq ILFDA
+derive instance ordILFDA :: Ord ILFDA
+derive instance genericILFDA :: Generic ILFDA _
+
+instance showILFDA :: Show ILFDA where
+  show = genericShow
+
+instance boundedILFDA :: Bounded ILFDA where
+  top = genericTop
+  bottom = genericBottom
+
+instance enumILFDA :: Enum ILFDA where
+  succ = genericSucc
+  pred = genericPred
+
+derive instance eqT32 :: Eq T32
+derive instance ordT32 :: Ord T32
+derive instance genericT32 :: Generic T32 _
+
+instance showT32 :: Show T32 where
+  show = genericShow
+
+instance enumT32 :: Enum T32 where
+  succ = genericSucc
+  pred = genericPred
+
+derive instance eqJTA :: Eq JTA
+derive instance ordJTA :: Ord JTA
+derive instance genericJTA :: Generic JTA _
+
+instance showJTA :: Show JTA where
+  show = genericShow
+
+instance enumJTA :: Enum JTA where
+  succ = genericSucc
+  pred = genericPred
+
+derive instance eqJT :: Eq JT
+derive instance ordJT :: Ord JT
+derive instance genericJT :: Generic JT _
+
+instance showJT :: Show JT where
+  show = genericShow
+
+instance enumJT :: Enum JT where
+  succ = genericSucc
+  pred = genericPred
+
+derive instance eqIL :: Eq IL
+derive instance ordIL :: Ord IL
+derive instance genericIL :: Generic IL _
+
+instance showIL :: Show IL where
+  show = genericShow
+
+instance boundedIL :: Bounded IL where
+  top = genericTop
+  bottom = genericBottom
+
+instance enumIL :: Enum IL where
+  succ = genericSucc
+  pred = genericPred
+
+instance boundedEnumIL :: BoundedEnum IL where
+  cardinality = genericCardinality
+  toEnum = genericToEnum
+  fromEnum = genericFromEnum
+
+derive instance eqNumOperation :: Eq NumOperation
+derive instance ordNumOperation :: Ord NumOperation
+derive instance genericNumOperation :: Generic NumOperation _
+
+instance showNumOperation :: Show NumOperation where
+  show = genericShow
+
+instance enumNumOperation :: Enum NumOperation where
+  succ = genericSucc
+  pred = genericPred
+
+derive instance eqStackOperation :: Eq StackOperation
+derive instance ordStackOperation :: Ord StackOperation
+derive instance genericStackOperation :: Generic StackOperation _
+
+instance showStackOperation :: Show StackOperation where
+  show = genericShow
+
+instance enumStackOperation :: Enum StackOperation where
+  succ = genericSucc
+  pred = genericPred
+
+derive instance eqBitOperation :: Eq BitOperation
+derive instance ordBitOperation :: Ord BitOperation
+derive instance genericBitOperation :: Generic BitOperation _
+
+instance showBitOperation :: Show BitOperation where
+  show = genericShow
+
+instance enumBitOperation :: Enum BitOperation where
+  succ = genericSucc
+  pred = genericPred
+
+derive instance eqInstruction :: Eq Instruction
+
+derive instance genericInstruction :: Generic Instruction _
+
+instance showIstr :: Show Instruction where
+  show instr = genericShow instr
+
+derive instance eqArrayType :: Eq ArrayType
+
+derive instance genericArrayType :: Generic ArrayType _
+
+instance showArrayType :: Show ArrayType where
+  show = genericShow

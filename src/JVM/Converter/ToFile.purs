@@ -5,14 +5,14 @@ import Prelude
 import Control.Monad.Error.Class (class MonadThrow, throwError)
 import Data.Array as A
 import Data.Binary.Binary (class Binary, put)
-import Data.Binary.Put (putToInt8Array)
+import Data.Binary.Put (putToString)
 import Data.Binary.Types (Word16(..), Word32(..), Word8(..))
 import Data.BitMask (maskValue)
-import Data.Char (fromCharCode)
-import Data.FoldableWithIndex (findWithIndex, foldlWithIndex)
+import Data.FoldableWithIndex (findWithIndex)
+import Data.Generic.Rep (class Generic)
+import Data.Generic.Rep.Show (genericShow)
 import Data.Map as M
 import Data.Maybe (Maybe(..))
-import Data.String.CodeUnits (fromCharArray)
 import Data.Traversable (traverse)
 import Data.Tuple (Tuple(..))
 import Data.UInt (fromInt)
@@ -24,6 +24,11 @@ import JVM.Members (Field(..), FieldDirect(..), FieldFile(..), FieldNameType(..)
 data Direct2FileError = NoItemInPool String
                         | InvalidFieldSignature FieldType
                         | InvalidMethodSignature MethodSignature
+
+derive instance genericDirect2FileError :: Generic Direct2FileError _
+
+instance showDirect2FileError :: Show Direct2FileError where
+  show = genericShow
 
 attrInfo :: forall m. MonadThrow Direct2FileError m
                       => PoolDirect
@@ -52,9 +57,9 @@ poolIndex pool name =
 
 sigToString :: forall m a. MonadThrow Direct2FileError m => Binary a => (a -> Direct2FileError) -> a -> m String
 sigToString errFun sig =
-  case traverse fromCharCode $ putToInt8Array (put sig) of
+  case putToString (put sig) of
     Nothing -> throwError $ errFun sig
-    (Just arr) -> pure $ fromCharArray arr
+    (Just str) -> pure str
 
 poolClassIndex :: forall m. MonadThrow Direct2FileError m => PoolDirect -> String -> m Word16
 poolClassIndex pool name =
@@ -72,7 +77,7 @@ poolCNameTypeIndex :: forall m s. MonadThrow Direct2FileError m
                             -> m Word16
 poolCNameTypeIndex errFun pool fldNT @ {ntName, ntSignature} = do
   sigTxt <- sigToString errFun ntSignature
-  (toResult $ "{ ntName " <> ntName <> " signature " <> (show ntSignature) <> "}") $ findWithIndex (withCNameType sigTxt) pool
+  (toResult $ "{ ntName '" <> ntName <> "', signature '" <> (show (putToString (put ntSignature))) <> "' }") $ findWithIndex (withCNameType sigTxt) pool
   where
     withCNameType sigTxt _ (CNameType nm sig) | nm == ntName && sig == sigTxt = true
     withCNameType _ _ _ = false

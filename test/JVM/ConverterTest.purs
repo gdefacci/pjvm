@@ -9,11 +9,12 @@ import Data.ArrayBuffer.Types (ArrayBuffer)
 import Data.Binary.Binary (get, put)
 import Data.Binary.Decoder (decodeFull)
 import Data.Binary.Put (runPut)
-import Data.Either (fromRight, isRight)
+import Data.Either (fromRight, isLeft, isRight)
 import Data.Traversable (traverse)
 import Data.Tuple (Tuple(..), fst)
 import Effect.Aff (Aff)
 import Effect.Class (liftEffect)
+import Effect.Class.Console (log)
 import JVM.ClassFile (Class(..), ClassFile(..))
 import JVM.Converter.ToDirect (classFile2Direct)
 import JVM.Converter.ToFile (classDirect2File)
@@ -49,24 +50,20 @@ testToFileReadWrite path =
     resArr <- runPut classFilePut
     Assert.assert (show path) $ resArr `bufferEquals` ab
 
--- testToDirectReadWrite :: String -> Aff Unit
--- testToDirectReadWrite path =
---   do
---     (ClassFile (Class {constsPool})) <- fst <$> readClassFile path
---     let cnstPoolEither = poolFile2Direct constsPool
---     Assert.assert ("can convert"<> (show path) <> "to clssDir") $ isRight cnstPoolEither
-
 testToDirectReadWrite :: String -> Aff Unit
 testToDirectReadWrite path =
   do
     clss <- fst <$> readClassFile path
     let clssDirEither = classFile2Direct clss
-    Assert.assert ("can convert"<> (show path) <> "to clssDir") $ isRight clssDirEither
+    when (isLeft clssDirEither) $ log $ (show clssDirEither)
+    Assert.assert ("can convert"<> (show path) <> "to direct") $ isRight clssDirEither
     let clssDir = (unsafePartial $ fromRight clssDirEither)
     let clssFileEither = classDirect2File clssDir
+    when (isLeft clssFileEither) $ log $ (show clssFileEither)
     Assert.assert ("toDirect can convert back to file " <> path) $ isRight clssFileEither
     let clssFile = (unsafePartial $ fromRight clssFileEither)
-    Assert.assert ("toDirect read and write " <> path) $ isRight clssFileEither
+    when (clssFile /= clss) $ log $ "\n" <> (show clss) <> "\n\n\n" <> (show clssFile)
+    Assert.assert ("toDirect read and write " <> path) $ clssFile == clss
 
 base :: Array String
 base = [".", "test", "resources", "testclasses"]

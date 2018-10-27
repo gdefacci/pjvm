@@ -15,7 +15,7 @@ import Data.List.Lazy (replicateM)
 import Data.Maybe (Maybe(..))
 import Data.Newtype (class Newtype, unwrap)
 import Data.Set as S
-import Data.String.CodeUnits (fromCharArray)
+import Data.String.CodeUnits (fromCharArray, toCharArray)
 import Data.UInt (toInt)
 import JVM.Attributes (AttributesDirect, AttributesFile(..), attributesList)
 import JVM.Flags (FieldAccessFlag, MethodAccessFlag)
@@ -62,7 +62,6 @@ instance showReturnSignature :: Show ReturnSignature where
 -- | Class method argument signature
 data MethodSignature =
     MethodSignature (Array FieldType) ReturnSignature
-  --deriving (Eq, Ord)
 
 derive instance eqMethodSignature :: Eq MethodSignature
 
@@ -151,17 +150,17 @@ fieldNameType (FieldDirect (Field {fieldName, fieldSignature})) = FieldNameType
   }
 
 instance binaryFieldType :: Binary FieldType where
-  put SignedByte = put "B"
-  put CharByte   = put "C"
-  put DoubleType = put "D"
-  put FloatType  = put "F"
-  put IntType    = put "I"
-  put LongInt    = put "J"
-  put ShortInt   = put "S"
-  put BoolType   = put "Z"
-  put (ObjectType name) = put "L" <> put name <> put ";"
-  put (Array Nothing sig) = put "[" <> put sig
-  put (Array (Just n) sig) = put "[" <> put (show n) <> put sig
+  put SignedByte = put 'B'
+  put CharByte   = put 'C'
+  put DoubleType = put 'D'
+  put FloatType  = put 'F'
+  put IntType    = put 'I'
+  put LongInt    = put 'J'
+  put ShortInt   = put 'S'
+  put BoolType   = put 'Z'
+  put (ObjectType name)    = put 'L' <> putFoldable (toCharArray name) <> put ';'
+  put (Array Nothing sig)  = put '[' <> put sig
+  put (Array (Just n) sig) = put '[' <> put (show n) <> put sig
 
   get = do
     b <- getChar8
@@ -180,7 +179,7 @@ instance binaryFieldType :: Binary FieldType where
       '[' -> do
              mbSize <- getInt
              sig <- get
-             pure (Array (Just mbSize) sig)
+             pure (Array mbSize sig)
       _   -> fail $ \offset -> GenericParserError { offset, message: "Unknown signature"}
 
 instance binaryReturnSignature :: Binary ReturnSignature where
@@ -193,14 +192,13 @@ instance binaryReturnSignature :: Binary ReturnSignature where
       'V' -> do
         _ <- getUInt8
         pure $ ReturnsVoid
-      _   -> get
+      _   ->
+        Returns <$> get
 
-getInt :: Decoder Int
+getInt :: Decoder (Maybe Int)
 getInt = do
     sds <- getDigits
-    case fromString $ fromCharArray sds of
-      Nothing -> fail $ \offset -> GenericParserError { offset, message: "Error parsing Int " <> fromCharArray sds}
-      (Just n) -> pure n
+    pure $ fromString $ fromCharArray sds
 
   where
     getDigits :: Decoder (Array Char)
@@ -238,17 +236,27 @@ instance binaryMethodSignature :: Binary MethodSignature where
     ret <- get
     pure $ MethodSignature args ret
 
+-- | Read arguments signatures (up to `)')
 getArgs :: Decoder (Array FieldType)
-getArgs = getArg mempty
+getArgs = whileJust getArg
   where
-    getArg :: Array FieldType -> Decoder (Array FieldType)
-    getArg acc = do
+    getArg :: Decoder (Maybe FieldType)
+    getArg = do
       x <- lookAhead getChar8
       if x == ')'
-        then pure acc
-        else do
-          v <- get
-          pure $ A.snoc acc v
+        then pure Nothing
+        else Just <$> get
+
+whileJust :: forall m a. Monad m => m (Maybe a) -> m (Array a)
+whileJust m = do
+  r <- m
+  case r of
+    Just x ->
+      do
+        next <- whileJust m
+        pure $ A.cons x next
+    Nothing ->
+        pure []
 
 instance fieldFileBinary :: Binary FieldFile where
   put (FieldFile (Field {fieldAccessFlags, fieldName, fieldSignature, fieldAttributesCount, fieldAttributes })) =

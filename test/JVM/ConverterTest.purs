@@ -62,8 +62,12 @@ testToDirectReadWrite path =
     when (isLeft clssFileEither) $ log $ (show clssFileEither)
     Assert.assert ("toDirect can convert back to file " <> path) $ isRight clssFileEither
     let clssFile = (unsafePartial $ fromRight clssFileEither)
-    when (clssFile /= clss) $ log $ "\n" <> (show clss) <> "\n\n\n" <> (show clssFile)
-    Assert.assert ("toDirect read and write " <> path) $ clssFile == clss
+    when (clssFile /= clss) $ do
+      let clssDirEither1 = classFile2Direct clss
+      when (isLeft clssDirEither1) $ log $ (show clssDirEither1)
+      Assert.assert ("can convert back "<> (show path) <> " to direct") $ isRight clssDirEither1
+      let clssDir1 = (unsafePartial $ fromRight clssDirEither)
+      Assert.assert ("the same class direct is generated " <> path) $ clssDir1 == clssDir
 
 base :: Array String
 base = [".", "test", "resources", "testclasses"]

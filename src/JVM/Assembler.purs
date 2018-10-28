@@ -15,7 +15,7 @@ import Data.UInt (fromInt, toInt)
 import JVM.Attributes (AttributesFile(..), attributesList)
 import JVM.Instruction (Instruction)
 
-data Code = Code 
+data Code = Code
     { codeStackSize :: Word16
     , codeMaxLocals :: Word16
     , codeLength :: Word32
@@ -33,7 +33,7 @@ instance showCode :: Show Code where
   show = genericShow
 
 -- | Exception descriptor
-data CodeException = CodeException 
+data CodeException = CodeException
     { eStartPC :: Word16
     , eEndPC :: Word16
     , eHandlerPC :: Word16
@@ -65,7 +65,7 @@ instance  binaryCode :: Binary Code where
     put codeExceptionsN <>
     putFoldable codeExceptions <>
     put codeAttrsN <>
-    putFoldable (attributesList codeAttributes) 
+    putFoldable (attributesList codeAttributes)
 
   get = do
     codeStackSize <- get
@@ -76,9 +76,12 @@ instance  binaryCode :: Binary Code where
     codeExceptions <- A.fromFoldable <$> replicateM (toInt $ unwrap codeExceptionsN) get
     codeAttrsN <- get
     codeAttributes <- (A.fromFoldable >>> AttributesFile) <$> (replicateM (toInt $ unwrap codeAttrsN) get)
-    pure $ Code { codeStackSize,codeMaxLocals,codeLength,codeInstructions, 
+    pure $ Code { codeStackSize,codeMaxLocals,codeLength,codeInstructions,
                   codeExceptionsN,codeExceptions,codeAttrsN,codeAttributes}
 
 encodeInstructions :: (Array Instruction) -> Array Word8
-encodeInstructions code = 
-  (fromInt >>> Word8) <$> (putToInt8Array (putFoldable code))
+encodeInstructions intructions = (fromInt >>> Word8) <$> putToInt8Array (putFoldable intructions)
+
+-- | Encode Java method
+encodeMethod :: Code -> Array Word8
+encodeMethod code = (fromInt >>> Word8) <$> putToInt8Array (put code)

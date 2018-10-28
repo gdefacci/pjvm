@@ -35,7 +35,7 @@ data Class pool accessFlag b fld mthd attr = Class {
   classMethodsCount :: Word16,    -- ^ Number of class methods
   classMethods :: Array mthd,     -- ^ Class methods
   classAttributesCount :: Word16, -- ^ Number of class attributes
-  classAttributes :: attr   -- ^ Class attributes
+  classAttributes :: attr         -- ^ Class attributes
   }
 
 derive instance repGenericClass :: Generic (Class pool accessFlag b fld mthd attr) _
@@ -65,6 +65,9 @@ lookupField name (ClassDirect(Class {classFields})) = look classFields
       | fieldName == name = Just field
       | otherwise         = look fs
 
+xCAFEBABE :: Word32
+xCAFEBABE = Word32 $ fromNumber 3405691582.0
+
 instance binaryClassFile :: Binary ClassFile where
   put (ClassFile (Class {  magic,minorVersion,majorVersion,constsPoolSize,constsPool,accessFlags,
                 thisClass,superClass,interfacesCount,interfaces,classFieldsCount,
@@ -87,7 +90,6 @@ instance binaryClassFile :: Binary ClassFile where
     putFoldable (attributesList classAttributes)
 
   get = do
-    let xCAFEBABE = Word32 $ fromNumber 3405691582.0
     magic <- get
     when (magic /= xCAFEBABE) $
       fail (\offset -> GenericParserError { offset, message: "Invalid .class file MAGIC value: " <> show magic })

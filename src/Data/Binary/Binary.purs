@@ -4,11 +4,10 @@ import Prelude
 
 import Data.ArrayBuffer.DataView (setFloat32be, setFloat64be, setUint16be, setUint32be, setUint8)
 import Data.ArrayBuffer.Types (ByteLength, ByteOffset)
-import Data.Binary.Decoder (ByteLengthString(..), Decoder, getByteLengthString, getChar, getFloat32, getFloat64, getString, getUInt16, getUInt32, getUInt8)
-import Data.Binary.Put (Put, charPut, fromSetter, putN, uint8Put)
+import Data.Binary.Decoder (ByteLengthString(..), Decoder, getByteLengthString, getChar, getChar8, getFloat32, getFloat64, getString, getUInt16, getUInt32, getUInt8)
+import Data.Binary.Put (Put, charPut, fromSetter, putChar8, putN, uint8Put)
 import Data.Binary.Types (Float32(..), Float64(..), Word16(..), Word32(..), Word64(..), Word8(..))
-import Data.Foldable (class Foldable, foldMap)
-
+import Data.Foldable (class Foldable, foldMap, foldl)
 import Data.Newtype (unwrap)
 import Data.String as STR
 import Data.String.CodeUnits (toCharArray)
@@ -52,13 +51,16 @@ instance binaryFloat64 :: Binary Float64 where
   get = Float64 <$> getFloat64
 
 instance binaryChar :: Binary Char where
-  put = charPut
-  get = getChar
+  put = putChar8
+  get = getChar8
 
 instance binaryString :: Binary String where
-  put =
-    (STR.length >>> fromInt >>> Word16 >>> put) <>
-    (toCharArray >>> putFoldable)
+  put str =
+    let toTup (Tuple len accPut) ch =
+          let (Tuple chl chPut) = charPut ch
+          in Tuple (len + chl) (accPut <> chPut)
+        (Tuple strLen strPut) =  foldl toTup (Tuple 0 mempty) (toCharArray str)
+    in (put (Word16 $ fromInt strLen)) <> strPut
 
   get = getString
 

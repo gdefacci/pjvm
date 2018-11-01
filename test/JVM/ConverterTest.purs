@@ -2,9 +2,8 @@ module JVM.ConverterTest where
 
 import Prelude
 
+import TestHelper (bufferEquals, bufferToArray)
 import Data.Array as A
-import Data.ArrayBuffer.DataView as DV
-import Data.ArrayBuffer.Typed (asUint8Array, toIntArray)
 import Data.ArrayBuffer.Types (ArrayBuffer)
 import Data.Binary.Binary (get, put)
 import Data.Binary.Decoder (decodeFull)
@@ -15,28 +14,23 @@ import Data.Tuple (Tuple(..), fst)
 import Effect.Aff (Aff)
 import Effect.Class (liftEffect)
 import Effect.Class.Console (log)
-import JVM.ClassFile (Class(..), ClassFile(..))
+import JVM.ClassFile (ClassFile)
 import JVM.Converter.ToDirect (classFile2Direct)
 import JVM.Converter.ToFile (classDirect2File)
 import Node.Buffer (toArrayBuffer) as ND
 import Node.FS.Aff (readFile, readdir) as ND
+import Node.FS.Stats (isDirectory) as ND
+import Node.FS.Sync (stat) as ND
+import Node.Path (FilePath)
 import Node.Path as Path
 import Partial.Unsafe (unsafePartial)
 import Test.Unit (TestSuite, test)
 import Test.Unit.Assert as Assert
 
-bufferEquals :: ArrayBuffer -> ArrayBuffer -> Boolean
-bufferEquals bf1 bf2 =
-  let dv1 = DV.whole bf1
-      dv2 = DV.whole bf2
-      toArray = asUint8Array >>> toIntArray
-      arr1 = toArray dv1
-      arr2 = toArray dv2
-  in arr1 == arr2
-
 readClassFile :: String -> Aff (Tuple ClassFile ArrayBuffer)
 readClassFile path =
   do
+    log $ "Reading class " <> path
     buff <- ND.readFile path
     ab <- liftEffect $ ND.toArrayBuffer buff
     (clss :: ClassFile) <- liftEffect $ decodeFull get ab
@@ -48,6 +42,14 @@ testToFileReadWrite path =
     (Tuple clss ab) <- readClassFile path
     let classFilePut = put clss
     resArr <- runPut classFilePut
+    when (not $ resArr `bufferEquals` ab) do
+      let arr1 = bufferToArray resArr
+          arr2 = bufferToArray ab
+      log $ "len 1 " <> (show $ A.length arr1)
+      log $ "len 2 " <> (show $ A.length arr2)
+      log $ show $ arr1
+      log "============="
+      log $ show $ arr2
     Assert.assert (show path) $ resArr `bufferEquals` ab
 
 testToDirectReadWrite :: String -> Aff Unit
@@ -72,6 +74,26 @@ testToDirectReadWrite path =
 base :: Array String
 base = [".", "test", "resources", "testclasses"]
 
+-- allClasses :: (Array String) -> Aff FilePath
+allClasses :: Array FilePath -> Aff (Array FilePath)
+allClasses folder = do
+  content <- ND.readdir $ Path.concat folder
+  join <$> traverse getContent content
+  where
+    isClass pth = (Path.extname pth) == ".class"
+
+    getContent :: FilePath -> Aff (Array FilePath)
+    getContent f = do
+      let fullpathSegments = A.snoc folder f
+          fullpath = Path.concat fullpathSegments
+      fileInfo <- liftEffect $ ND.stat fullpath
+      if ND.isDirectory fileInfo
+        then allClasses fullpathSegments
+        else if isClass fullpath
+          then liftEffect $ pure $ A.singleton fullpath
+          else liftEffect $ pure mempty
+
+
 testClasses :: Aff (Array Path.FilePath)
 testClasses = do
     files <- ND.readdir $ Path.concat base
@@ -83,4 +105,3 @@ spec = do
     void $ testClasses >>= traverse testToFileReadWrite
   test "testToDirectReadWrite" $ do
     void $ testClasses >>= (traverse testToDirectReadWrite)
-

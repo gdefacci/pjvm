@@ -1,19 +1,21 @@
-module Data.Binary.Put (Put, charPut, fromSetter, putN, putFail, runPut, uint8Put, putToString, putToDataView, putToInt8Array) where
+module Data.Binary.Put (Put, charPut, fromSetter, putN, putFail, runPut, uint8Put, putToString, putToDataView, putToInt8Array, putChar8) where
 
 import Prelude
 
-import Data.Array (fold)
+import Data.Array (fold, length)
 import Data.ArrayBuffer.ArrayBuffer (create)
-import Data.ArrayBuffer.DataView (Setter, setUint8, whole)
+import Data.ArrayBuffer.DataView (Setter, setInt8, setUint8, whole)
 import Data.ArrayBuffer.DataView as DV
 import Data.ArrayBuffer.Typed (asInt8Array, asUint8Array, toIntArray)
 import Data.ArrayBuffer.Types (ArrayBuffer, ByteOffset, DataView)
 import Data.Char (fromCharCode, toCharCode)
+import Data.Char as CH
 import Data.Function (applyN)
-import Data.Int.Bits (shr, (.&.), (.|.))
+import Data.Int.Bits (shl, shr, (.&.), (.|.))
 import Data.Maybe (Maybe(..))
 import Data.String.CodeUnits (fromCharArray)
 import Data.Traversable (traverse)
+import Data.Tuple (Tuple(..))
 import Data.UInt (UInt, fromInt)
 import Effect (Effect)
 import Effect.Class (class MonadEffect, liftEffect)
@@ -75,8 +77,10 @@ charBytes ch =
     c | c > 0 && c <= x7f ->
       Just [c]
     c | c >= x0080 && c <= x07ff ->
-      Just [  xc0 .|. (x1f .&. (shr c 6)),
-              x80 .|. (x3f .&. c) ]
+      Just [xc0 .|. (shr c 6),
+            x80 .|. (x3f .&. c) ]
+      -- Just [  xc0 .|. (x1f .&. (shr c 6)),
+      --         x80 .|. (x3f .&. c) ]
     c | c >= x0800 && c <= xffff ->
       Just [  xe0 .|. (x0f .&. (shr c 12)),
               x80 .|. (x3f .&. (shr c 6)),
@@ -86,11 +90,17 @@ charBytes ch =
 uint8Put :: UInt -> Put
 uint8Put = fromSetter 1 setUint8
 
-charPut :: Char -> Put
+int8Put :: Int -> Put
+int8Put = fromSetter 1 setInt8
+
+putChar8 :: Char -> Put
+putChar8 = uint8Put <<< fromInt <<< CH.toCharCode
+
+charPut :: Char -> (Tuple Int Put)
 charPut ch =
   case charBytes ch of
-    Nothing -> putFail $ \ofst -> "Cant convert char " <> (show ch) <> " to modified UTF-8, offset" <> (show ofst)
-    (Just cbs) -> fold $ (fromInt >>> uint8Put) <$> cbs
+    Nothing -> (Tuple 0 $ putFail $ \ofst -> "Cant convert char " <> (show ch) <> " to modified UTF-8, offset" <> (show ofst))
+    (Just cbs) -> Tuple (length cbs) (fold $ int8Put <$> cbs)
 
 putToDataView :: Put -> DataView
 putToDataView put = unsafePerformEffect $ DV.whole <$> runPut put

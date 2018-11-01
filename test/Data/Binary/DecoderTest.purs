@@ -3,11 +3,13 @@ module Data.Binary.DecoderTest (spec) where
 import Prelude
 
 import Data.ArrayBuffer.ArrayBuffer as AB
-import Data.ArrayBuffer.DataView as DV
-import Data.ArrayBuffer.Types (ArrayBuffer, DataView)
-import Data.Binary.Binary (get)
-import Data.Binary.Decoder (Decoder, decodeBuffer, decodeFull, getString, runDecoder)
-import Data.Binary.Types (Word16(..), Word32(..), Word64(..))
+import Data.ArrayBuffer.Types (ArrayBuffer)
+import Data.Binary.Binary (get, put, class Binary)
+import Data.Binary.Decoder (Decoder, decode, decodeBuffer, decodeFull, getString)
+import Data.Binary.Put (runPut)
+import Data.Binary.PutTest (bin)
+import Data.Binary.Types (Word16(..), Word32(..), Word64(..), Word8(..))
+import Data.Either (fromRight, isRight)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Eq (genericEq)
 import Data.Generic.Rep.Show (genericShow)
@@ -15,8 +17,9 @@ import Data.Tuple (Tuple(..))
 import Data.UInt (fromInt)
 import Effect.Aff (Aff)
 import Effect.Class (liftEffect)
+import Effect.Class.Console (log)
+import Partial.Unsafe (unsafePartial)
 import Test.Unit.Assert as Assert
-
 
 spec :: Aff Unit
 spec = do
@@ -24,6 +27,26 @@ spec = do
   testData
   testData1
   testRec
+  testReadWrite "a simple string"
+  testReadWrite 'c'
+  testReadWrite '%'
+  testReadWrite $ Word8  $ fromInt 42
+  testReadWrite $ Word16 $ fromInt 42
+  testReadWrite $ Word32 $ fromInt 42
+  testReadWrite $ Word64 (fromInt $ 42) (fromInt $ 442)
+
+  testGetEquals "ù"  [bin "0", bin "10", bin "11000011", bin "10111001"] "ù"
+  testGetEquals "à"  [bin "0", bin "10", bin "11000011", bin "10100000"] "à"
+  testGetEquals "è"  [bin "0", bin "10", bin "11000011", bin "10101000"] "è"
+  testGetEquals "é"  [bin "0", bin "10", bin "11000011", bin "10101001"] "é"
+  testGetEquals "д"  [bin "0", bin "10", bin "11010000", bin "10110100"] "д"
+  testGetEquals "и"  [bin "0", bin "10", bin "11010000", bin "10111000"] "и"
+  testGetEquals "й"  [bin "0", bin "10", bin "11010000", bin "10111001"] "й"
+  testGetEquals "电" [bin "0", bin "11", bin "11100111", bin "10010100", bin "10110101"] "电"
+  testGetEquals "脑" [bin "0", bin "11", bin "11101000", bin "10000100", bin "10010001"] "脑"
+
+  testReadWrite "ù"
+  testReadWrite "a i18 string èàù"
 
 testGetString :: Aff Unit
 testGetString = do
@@ -51,6 +74,20 @@ testData1 = do
   res <- liftEffect $ decodeFull myTypeDecoder arrayBuffer1
   Assert.assert "can parse data" $ res == expectedMyType1
 
+testReadWrite :: forall a. Binary a => Show a => Eq a => a -> Aff Unit
+testReadWrite a = do
+  buff <- runPut $ put a
+  let eithr = decode get buff
+  Assert.assert ("can read written data " <> show a) $ isRight eithr
+  let (Tuple {offset} res) = unsafePartial $ fromRight eithr
+  when (a /= res) do
+    log $ ""
+    log $ "input  :" <> (show a)
+    log $ ""
+    log $ "output :" <> (show res)
+  Assert.assert ("putting and getting gives back the original input " <> show a) $ a == res
+  Assert.assert ("get consume all ther buffer " <> show a) $ offset == AB.byteLength buff
+
 testRec :: Aff Unit
 testRec = do
   let expectedMyRec = MyRec
@@ -61,6 +98,17 @@ testRec = do
         }
   res <- liftEffect $ decodeFull myRecDecoder arrayBuffer1
   Assert.assert "can parse record" $ res == expectedMyRec
+
+type Description = String
+
+testGetEquals :: forall a. Eq a => Show a => Binary a => Description -> (Array Int) -> a  -> Aff Unit
+testGetEquals desc arr expected = do
+  let buf = AB.fromIntArray arr
+  (Tuple {offset} re) <- decodeBuffer get buf
+  Assert.assert (" didnt parse all input while decoding " <> show arr) $ offset == (AB.byteLength buf)
+  Assert.assert (desc <> ", but the result is " <> (show re)) $ expected == re
+
+-------------------------------
 
 data MyType = MyType Word32 String Word64 Word16
 

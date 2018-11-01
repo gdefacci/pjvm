@@ -14,11 +14,10 @@ import Data.Char as CH
 import Data.Either (Either(..))
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
-import Data.Int.Bits (shl, (.&.), (.|.))
 import Data.Maybe (Maybe(..))
 import Data.String.CodeUnits (fromCharArray)
 import Data.Tuple (Tuple(..), snd)
-import Data.UInt (UInt, toInt)
+import Data.UInt (UInt, fromInt, shl, toInt, (.&.), (.|.))
 import Effect.Class (class MonadEffect, liftEffect)
 import Effect.Exception (throw)
 import Effect.Unsafe (unsafePerformEffect)
@@ -130,6 +129,9 @@ sized n f = do
       setOffset $ ofs + n
       pure v
 
+getInt8 :: forall m. ST.MonadState ParserState m => MonadThrow ParserError m => m Int
+getInt8 = sized 1 $ DV.getInt8
+
 getUInt8 :: forall m. ST.MonadState ParserState m => MonadThrow ParserError m => m UInt
 getUInt8 = sized 1 $ DV.getUint8
 
@@ -193,44 +195,39 @@ skip n = do
   ofs <- getOffset
   setOffset $ ofs + n
 
+x00 :: UInt
+x00     = fromInt 0
+x0f :: UInt
+x0f     = fromInt 15
+x1f :: UInt
+x1f     = fromInt 31
+x3f :: UInt
+x3f     = fromInt 63
+x80 :: UInt
+x80     = fromInt 128
+xc0 :: UInt
+xc0     = fromInt 192
+xe0 :: UInt
+xe0     = fromInt 224
+xf0 :: UInt
+xf0     = fromInt 240
+
 getChar :: forall m. ST.MonadState ParserState m => MonadThrow ParserError m => m Char
-getChar =
-  let x0f     = 15
-      x1f     = 31
-      x3f     = 63
-      bit :: Int -> Int
-      bit i = 1 `shl` i
-      testBit :: Boolean -> Int -> Int -> Boolean
-      testBit expectedValue x i =
-        let bt = x .&. bit i
-        in if expectedValue then bt /= 0 else bt /= 1
+getChar = do
+  uchr8 <- getUInt8
+  let unrecognizedChar offset = UnrecognizedChar { offset, charCode: uchr8 }
+  resCharCode <- case uchr8 of
+    a | a .&. x80 == x00 -> pure a
+    a | a .&. xe0 == xc0 -> do
+      b <- getUInt8
+      pure $ (shl (a .&. x1f) $ fromInt 6) .|. (b .&. x3f)
+    a | a .&. xf0 == xe0 -> do
+      b <- getUInt8
+      c <- getUInt8
+      pure $ (shl (a .&. x0f) $ fromInt 12 ) .|. (shl (b .&. x3f) $ fromInt 6) .|. (c .&. x3f)
+    _ -> fail unrecognizedChar
+  case fromCharCode $ toInt resCharCode of
+    (Just ch) -> pure ch
+    _ -> fail unrecognizedChar
 
-      is0xxxxxxx b = testBit false b 7
 
-      is110xxxxx b = testBit true b 7 &&
-                      testBit true b 6 &&
-                      testBit false b 5
-
-      is1110xxxx b = testBit true b 7 &&
-                      testBit true b 6 &&
-                      testBit true b 5 &&
-                      testBit false b 4
-
-  in do
-    uchr8 <- getUInt8
-    resCharCode <- case toInt uchr8 of
-      a | is0xxxxxxx a -> pure $ Just a
-      a | is110xxxxx a -> do
-        uchrb <- getUInt8
-        let b = toInt uchrb
-        pure $ Just $ (shl 6 (a .&. x1f)) .|. (b .&. x3f)
-      a | is1110xxxx a -> do
-        uchrb <- getUInt8
-        uchrc <- getUInt8
-        let b = toInt uchrb
-            c = toInt uchrc
-        pure $ Just $ (shl 12 (a .&. x0f)) .|. (shl 6 (b .&. x3f)) .|. (c .&. x3f)
-      _ -> pure Nothing
-    case fromCharCode =<< resCharCode of
-      Nothing -> fail $ \offset -> UnrecognizedChar { offset, charCode: uchr8 }
-      (Just ch) -> pure ch

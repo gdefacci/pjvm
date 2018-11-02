@@ -2,21 +2,20 @@ module Data.Binary.Binary where
 
 import Prelude
 
-import Data.ArrayBuffer.DataView (setFloat32be, setFloat64be, setUint16be, setUint32be, setUint8)
+import Data.ArrayBuffer.DataView (setFloat32be, setFloat64be, setUint16be, setUint32be)
 import Data.ArrayBuffer.Types (ByteLength, ByteOffset)
-import Data.Binary.Decoder (ByteLengthString(..), Decoder, getByteLengthString, getChar, getChar8, getFloat32, getFloat64, getString, getUInt16, getUInt32, getUInt8)
+import Data.Binary.Decoder (ByteLengthString(..), Decoder, getByteLengthString, getChar8, getFloat32, getFloat64, getString, getUInt16, getUInt32, getUInt8)
 import Data.Binary.Put (Put, charPut, fromSetter, putChar8, putN, uint8Put)
 import Data.Binary.Types (Float32(..), Float64(..), Word16(..), Word32(..), Word64(..), Word8(..))
 import Data.Foldable (class Foldable, foldMap, foldl)
 import Data.Newtype (unwrap)
-import Data.String as STR
 import Data.String.CodeUnits (toCharArray)
 import Data.Tuple (Tuple(..), fst, snd)
 import Data.UInt (fromInt)
 
 class Binary a where
   put :: a -> Put
-  get :: Decoder a
+  get :: forall m . Monad m => Decoder m a
 
 instance binaryWord8 :: Binary Word8 where
   put = unwrap >>> uint8Put

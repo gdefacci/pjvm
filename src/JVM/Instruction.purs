@@ -134,10 +134,11 @@ decodeEnum desc v =
     (Just r) -> pure r
 
 -- | Parse opcode with immediate constant
-imm :: forall a. Int                   -- ^ Base opcode
-    -> (IMM -> a)    -- ^ Instruction constructor
+imm :: forall m a. Monad m
+    => Int                   -- ^ Base opcode
+    -> (IMM -> a)            -- ^ Instruction constructor
     -> Int                   -- ^ Opcode to parse
-    -> Decoder a
+    -> Decoder m a
 imm base constr x =
   constr <$> decodeEnum "IMM" (x - base)
 
@@ -164,7 +165,7 @@ atype2byte T_SHORT    = Word8 $ fromInt 9
 atype2byte T_INT      = Word8 $ fromInt 10
 atype2byte T_LONG     = Word8 $ fromInt 11
 
-byte2atype :: Word8 -> Decoder ArrayType
+byte2atype :: forall m. Monad m => Word8 -> Decoder m ArrayType
 byte2atype (Word8 n) =
   case toInt n of
     4  -> pure T_BOOLEAN

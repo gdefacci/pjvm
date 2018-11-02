@@ -3,7 +3,6 @@ module JVM.Converter.ToDirect (classFile2Direct, File2DirectError) where
 import Prelude
 
 import Control.Monad.Error.Class (class MonadThrow, throwError)
-import Data.Array (find)
 import Data.Array as A
 import Data.ArrayBuffer.ArrayBuffer as AB
 import Data.Binary.Binary as Binary
@@ -67,11 +66,12 @@ attributesFile2Direct pool (AttributesFile attrs) =
       nm <- getString cnst
       pure $ Tuple nm attributeValue
 
-decodeOpt :: forall a m. MonadThrow File2DirectError m => Decoder a -> String -> m a
+decodeOpt :: forall a m. MonadThrow File2DirectError m => Decoder m a -> String -> m a
 decodeOpt dec str =
-  case decode dec (AB.fromString str) of
-    (Left err) -> throwError $ ParseError err
-    (Right (Tuple _ v)) -> pure v
+  toResult =<< decode dec (AB.fromString str)
+  where
+    toResult (Left err)          = throwError $ ParseError err
+    toResult (Right (Tuple _ v)) = pure v
 
 lookup :: forall k v m. MonadThrow File2DirectError m => Show k => Ord k => k -> M.Map k v -> m v
 lookup k mp =

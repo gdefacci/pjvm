@@ -4,7 +4,7 @@ import Prelude
 
 import Control.Monad.Error.Class (class MonadThrow, throwError)
 import Control.Monad.Except (ExceptT, runExceptT)
-import Control.Monad.State (State, runState)
+import Control.Monad.State (StateT, runStateT)
 import Control.Monad.State as ST
 import Data.Array as A
 import Data.ArrayBuffer.DataView as DV
@@ -36,29 +36,41 @@ derive instance genericParserError :: Generic ParserError _
 instance showParserError :: Show ParserError where
   show = genericShow
 
-type Decoder a = ExceptT ParserError (State ParserState) a
+type Decoder m a = ExceptT ParserError (StateT ParserState m) a
 
-decode :: forall err a. ExceptT err (State ParserState) a -> ArrayBuffer -> Either err (Tuple ParserState a)
+decode :: forall err m a. Functor m => ExceptT err (StateT ParserState m) a -> ArrayBuffer -> m (Either err (Tuple ParserState a))
 decode decoder buf =
-  toReult $ runDecoder decoder 0 (DV.whole buf)
+  toReult <$> (runDecoder decoder 0 (DV.whole buf))
   where
     toReult (Tuple (Left err) s) = Left err
-    toReult (Tuple (Right v) s) = Right $ Tuple s v
-
-decodeBuffer :: forall a m. MonadEffect m => ExceptT ParserError (State ParserState) a -> ArrayBuffer -> m (Tuple ParserState a)
+    toReult (Tuple (Right v) s)  = Right $ Tuple s v
+--
+decodeBuffer :: forall a m. MonadEffect m => ExceptT ParserError (StateT ParserState m) a -> ArrayBuffer -> m (Tuple ParserState a)
 decodeBuffer decoder arr =
-  case decode (consumeAllInput decoder) arr of
-    (Left err) -> liftEffect $ throw (show err)
-    (Right v) -> liftEffect $ pure v
+  toResult =<< (decode (consumeAllInput decoder) arr)
+  where
+    toResult ::  Either ParserError (Tuple ParserState a) -> m (Tuple ParserState a)
+    toResult (Left err) = liftEffect $ throw (show err)
+    toResult (Right v)  = liftEffect $ pure v
 
-decodeFull :: forall a m. MonadEffect m => ExceptT ParserError (State ParserState) a -> ArrayBuffer -> m a
+
+--decodeFull :: forall a m. MonadEffect m => ExceptT ParserError (State ParserState) a -> ArrayBuffer -> m a
+decodeFull :: forall m a. Functor m => MonadEffect m => ExceptT ParserError (StateT ParserState m) a -> ArrayBuffer -> m a
 decodeFull decoder arr = snd <$> (decodeBuffer decoder arr)
 
-runDecoder :: forall a err. ExceptT err (State ParserState) a
-                            -> ByteOffset
-                            -> DataView
-                            -> Tuple (Either err a) ParserState
-runDecoder dec offset dataview = runState (runExceptT dec) {offset, dataview}
+-- runDecoder :: forall err m a. ExceptT err (StateT ParserState m) a
+--                             -> ByteOffset
+--                             -> DataView
+--                             -> Tuple (Either err a) ParserState
+runDecoder :: forall m a err. ExceptT err (StateT ParserState m) a -> ByteOffset -> DataView -> m (Tuple (Either err a) ParserState)
+runDecoder dec offset dataview = runStateT (runExceptT dec) {offset, dataview}
+
+-- runDecoder1 :: forall a err. ExceptT err (State ParserState) a
+--                             -> ByteOffset
+--                             -> DataView
+--                             -> Tuple (Either err a) ParserState
+-- runDecoder1 dec offset dataview = runTrampoline $ runDecoder dec offset dataview
+
 
 getOffset :: forall m. ST.MonadState ParserState m  => m ByteOffset
 getOffset = do

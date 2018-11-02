@@ -105,3 +105,6 @@ spec = do
     void $ testClasses >>= traverse testToFileReadWrite
   test "testToDirectReadWrite" $ do
     void $ testClasses >>= (traverse testToDirectReadWrite)
+  -- test "show all classes" $ do
+  --   clss <- allClasses ["/", "temp", "rt"]
+  --   void $ traverse testToDirectReadWrite clss

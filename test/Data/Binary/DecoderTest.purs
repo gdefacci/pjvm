@@ -77,7 +77,7 @@ testData1 = do
 testReadWrite :: forall a. Binary a => Show a => Eq a => a -> Aff Unit
 testReadWrite a = do
   buff <- runPut $ put a
-  let eithr = decode get buff
+  let eithr = runIdentity $ decode get buff
   Assert.assert ("can read written data " <> show a) $ isRight eithr
   let (Tuple {offset} res) = unsafePartial $ fromRight eithr
   when (a /= res) do
@@ -119,10 +119,10 @@ newtype MyRec = MyRec
   , d :: Word16
   }
 
-myTypeDecoderAp ::   Decoder MyType
+myTypeDecoderAp :: forall m. Monad m => Decoder m MyType
 myTypeDecoderAp = MyType <$> get <*> get <*> get <*> get
 
-myTypeDecoder :: Decoder MyType
+myTypeDecoder :: forall m. Monad m => Decoder m MyType
 myTypeDecoder = do
   a <- get
   b <- get
@@ -143,5 +143,5 @@ instance eqMyRec :: Eq MyRec where
 instance showMyRec :: Show MyRec where
   show = genericShow
 
-myRecDecoder :: Decoder MyRec
+myRecDecoder :: forall m. Monad m => Decoder m MyRec
 myRecDecoder = MyRec <$> ({a : _, b: _,  c:_, d:_ } <$> get <*> get <*> get <*> get)

@@ -195,13 +195,13 @@ instance binaryReturnSignature :: Binary ReturnSignature where
       _   ->
         Returns <$> get
 
-getInt :: Decoder (Maybe Int)
+getInt :: forall m. Monad m => Decoder m (Maybe Int)
 getInt = do
     sds <- getDigits
     pure $ fromString $ fromCharArray sds
 
   where
-    getDigits :: Decoder (Array Char)
+    getDigits :: Decoder m (Array Char)
     getDigits = do
       c <- lookAhead getChar8
       if isDigit c
@@ -211,7 +211,7 @@ getInt = do
              pure $ A.cons c next
         else pure []
 
-getToSemicolon :: Decoder (Array Char)
+getToSemicolon :: forall m. Monad m => Decoder m (Array Char)
 getToSemicolon = do
   x <- getChar8
   if x == ';'
@@ -237,15 +237,17 @@ instance binaryMethodSignature :: Binary MethodSignature where
     pure $ MethodSignature args ret
 
 -- | Read arguments signatures (up to `)')
-getArgs :: Decoder (Array FieldType)
+getArgs :: forall m. Monad m => Decoder m (Array FieldType)
 getArgs = whileJust getArg
   where
-    getArg :: Decoder (Maybe FieldType)
+    getArg :: Decoder m (Maybe FieldType)
     getArg = do
-      x <- lookAhead getChar8
+      x <- lookAhead $ getChar8
       if x == ')'
         then pure Nothing
-        else Just <$> get
+        else do
+          v <- get
+          pure $ Just v
 
 whileJust :: forall m a. Monad m => m (Maybe a) -> m (Array a)
 whileJust m = do

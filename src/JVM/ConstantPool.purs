@@ -74,7 +74,7 @@ putPool pool =
                      put (Word8 $ fromInt 2) <>
                      put getString
 
-getPool :: Int -> Decoder PoolFile
+getPool :: forall m. Monad m => Int -> Decoder m PoolFile
 getPool n = do
     items <- ST.evalStateT go (Word16 $ fromInt 1)
     pure $ M.fromFoldable items
@@ -92,7 +92,7 @@ getPool n = do
           next <- go
           pure $ A.cons (Tuple idx c) next
 
-    getC :: Decoder ConstantFile
+    getC :: Decoder m ConstantFile
     getC = do
       (Word8 utag) <- get
       let tag = toInt utag

@@ -2,19 +2,22 @@ module JVM.ConverterTest where
 
 import Prelude
 
-import TestHelper (bufferEquals, bufferToArray)
 import Data.Array as A
 import Data.ArrayBuffer.Types (ArrayBuffer)
 import Data.Binary.Binary (get, put)
 import Data.Binary.Decoder (decodeFull)
 import Data.Binary.Put (runPut)
+import Data.Binary.Types (Float32(..), Float64(..))
 import Data.Either (fromRight, isLeft, isRight)
+import Data.Map as M
 import Data.Traversable (traverse)
 import Data.Tuple (Tuple(..), fst)
 import Effect.Aff (Aff)
 import Effect.Class (liftEffect)
 import Effect.Class.Console (log)
-import JVM.ClassFile (ClassFile)
+import Global (isNaN)
+import JVM.ClassFile (Class(..), ClassDirect(..), ClassFile)
+import JVM.ConstantPool (Constant(..), PoolDirect)
 import JVM.Converter.ToDirect (classFile2Direct)
 import JVM.Converter.ToFile (classDirect2File)
 import Node.Buffer (toArrayBuffer) as ND
@@ -26,6 +29,7 @@ import Node.Path as Path
 import Partial.Unsafe (unsafePartial)
 import Test.Unit (TestSuite, test)
 import Test.Unit.Assert as Assert
+import TestHelper (bufferEquals, bufferToArray)
 
 readClassFile :: String -> Aff (Tuple ClassFile ArrayBuffer)
 readClassFile path =
@@ -33,7 +37,7 @@ readClassFile path =
     log $ "Reading class " <> path
     buff <- ND.readFile path
     ab <- liftEffect $ ND.toArrayBuffer buff
-    (clss :: ClassFile) <- liftEffect $ decodeFull get ab
+    (clss :: ClassFile) <- decodeFull get ab
     pure (Tuple clss ab)
 
 testToFileReadWrite :: String -> Aff Unit
@@ -52,6 +56,14 @@ testToFileReadWrite path =
       log $ show $ arr2
     Assert.assert (show path) $ resArr `bufferEquals` ab
 
+constPoolWithoutNaNs :: PoolDirect -> PoolDirect
+constPoolWithoutNaNs =
+  M.filter notIsNaN
+  where
+    notIsNaN (CFloat (Float32 n)) = not $ isNaN n
+    notIsNaN (CDouble(Float64 n)) = not $ isNaN n
+    notIsNaN _ = true
+
 testToDirectReadWrite :: String -> Aff Unit
 testToDirectReadWrite path =
   do
@@ -69,7 +81,12 @@ testToDirectReadWrite path =
       when (isLeft clssDirEither1) $ log $ (show clssDirEither1)
       Assert.assert ("can convert back "<> (show path) <> " to direct") $ isRight clssDirEither1
       let clssDir1 = (unsafePartial $ fromRight clssDirEither)
-      Assert.assert ("the same class direct is generated " <> path) $ clssDir1 == clssDir
+      when (clssDir1 /= clssDir) $ do
+        let (ClassDirect (Class cl1 @ {constsPool:cp1})) = clssDir
+            (ClassDirect (Class cl2 @ {constsPool:cp2})) = clssDir1
+            cls1Nan = ClassDirect $ Class $ cl1 { constsPool = constPoolWithoutNaNs cp1 }
+            cls2Nan = ClassDirect $ Class $ cl2 { constsPool = constPoolWithoutNaNs cp1 }
+        Assert.assert "Generated class with ConstantPool without NaNs match " $ cls1Nan == cls2Nan
 
 base :: Array String
 base = [".", "test", "resources", "testclasses"]
@@ -93,7 +110,6 @@ allClasses folder = do
           then liftEffect $ pure $ A.singleton fullpath
           else liftEffect $ pure mempty
 
-
 testClasses :: Aff (Array Path.FilePath)
 testClasses = do
     files <- ND.readdir $ Path.concat base
@@ -105,6 +121,3 @@ spec = do
     void $ testClasses >>= traverse testToFileReadWrite
   test "testToDirectReadWrite" $ do
     void $ testClasses >>= (traverse testToDirectReadWrite)
-  -- test "show all classes" $ do
-  --   clss <- allClasses ["/", "temp", "rt"]
-  --   void $ traverse testToDirectReadWrite clss

@@ -77,7 +77,7 @@ testData1 = do
 testReadWrite :: forall a. Binary a => Show a => Eq a => a -> Aff Unit
 testReadWrite a = do
   buff <- runPut $ put a
-  let eithr = runIdentity $ decode get buff
+  eithr <- decode get buff
   Assert.assert ("can read written data " <> show a) $ isRight eithr
   let (Tuple {offset} res) = unsafePartial $ fromRight eithr
   when (a /= res) do

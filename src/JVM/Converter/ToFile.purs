@@ -165,7 +165,9 @@ classDirect2File (ClassDirect (Class {magic,minorVersion,majorVersion,constsPool
   do
     poolInfo <- poolDirect2File constsPool
     thsClss <- poolClassIndex constsPool thisClass
-    supClss <-  poolClassIndex constsPool superClass
+    supClss <- if (superClass == "")
+      then pure $ Word16 $ fromInt 0
+      else poolClassIndex constsPool superClass
     ifcs <- traverse (poolClassIndex constsPool) interfaces
     attrs <- toAttributesFile constsPool (arlist classAttributes)
     clsFlds <- traverse (fieldDirect2File constsPool) classFields

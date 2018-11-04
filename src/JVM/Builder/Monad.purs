@@ -3,8 +3,9 @@ module JVM.Builder.Monad where
 import Prelude
 
 import Control.Monad.Error.Class (class MonadError, class MonadThrow, throwError)
-import Control.Monad.Except (ExceptT(..), runExceptT)
-import Control.Monad.State (class MonadState, StateT(..), execStateT)
+import Control.Monad.Except (ExceptT, runExceptT)
+import Control.Monad.Rec.Class (class MonadRec)
+import Control.Monad.State (class MonadState, StateT, execStateT)
 import Control.Monad.State as ST
 import Data.Array as A
 import Data.Binary.Binary (class Binary, put)
@@ -25,7 +26,7 @@ import JVM.Flags (AccessFlag(..), MethodAccessFlag)
 import JVM.Instruction (Instruction)
 import JVM.Members (FieldNameType(..), FieldType, Method(..), MethodDirect(..), MethodNameType(..), MethodSignature(..), ReturnSignature)
 
-data GState = GState {
+newtype GState = GState {
   generated :: Array Instruction,          -- ^ Already generated code (in current method)
   currentPool :: PoolDirect,               -- ^ Already generated constants pool
   nextPoolIndex :: Word16,                 -- ^ Next index to be used in constants pool
@@ -48,6 +49,7 @@ derive newtype instance monadEffGenerate :: MonadEffect m => MonadEffect (Genera
 derive newtype instance monadStateGenerate :: Monad m => MonadState GState (Generate e m)
 derive newtype instance monadThrowGenerate :: Monad m => MonadThrow GenError (Generate GenError m)
 derive newtype instance monadErrorGenerate :: Monad m => MonadError GenError (Generate GenError m)
+derive newtype instance monadRecGenerate :: MonadRec m => MonadRec (Generate GenError m)
 
 execGenerate :: forall e m a. Functor m => Generate e m a -> m GState
 execGenerate (Generate m) =
@@ -135,8 +137,7 @@ addToPool c = addItem c
 
 putInstruction :: forall m. MonadState GState m => Instruction -> m Unit
 putInstruction instr =
-  void $ ST.modify $ \(GState st @ {generated}) ->
-    GState $ st { generated = A.snoc generated instr }
+  ST.modify_ $ \(GState st @ {generated}) -> GState $ st { generated = A.snoc generated instr }
 
 -- | Generate one (zero-arguments) instruction
 i0 :: forall m. MonadState GState m => Instruction -> m Unit
@@ -152,15 +153,16 @@ i1 fn c = do
   ix <- addToPool c
   i0 (fn ix)
 
+word16ToWord8 :: Word16 -> Word8
+word16ToWord8 (Word16 v) = Word8 v
+
 -- | Generate one one-argument instruction
 i8 :: forall m. MonadThrow GenError m
                 => MonadState GState m
                 => (Word8 -> Instruction)
                 -> ConstantDirect
                 -> m Unit
-i8 fn c = do
-  (Word16 ix) <- addToPool c
-  i0 (fn $ Word8 ix)
+i8 fn = i1 (word16ToWord8 >>> fn)
 
 -- | Set maximum stack size for current method
 setStackSize :: forall m. MonadState GState m => Word16 -> m Unit

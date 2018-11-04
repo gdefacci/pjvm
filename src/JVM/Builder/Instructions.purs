@@ -57,16 +57,21 @@ ldc2 x = i1 LDC2 x
 ldc2w :: forall m. MonadThrow GenError m => MonadState GState m => ConstantDirect -> m Unit
 ldc2w x = i1 LDC2W x
 
-iload :: forall m. MonadThrow GenError m => MonadState GState m => ConstantDirect -> m Unit
-iload x = i8 (LOAD ILFDA_I) x
-lload :: forall m. MonadThrow GenError m => MonadState GState m => ConstantDirect -> m Unit
-lload x = i8 (LOAD ILFDA_L) x
-fload :: forall m. MonadThrow GenError m => MonadState GState m => ConstantDirect -> m Unit
-fload x = i8 (LOAD ILFDA_F) x
-dload :: forall m. MonadThrow GenError m => MonadState GState m => ConstantDirect -> m Unit
-dload x = i8 (LOAD ILFDA_D) x
-aload :: forall m. MonadThrow GenError m => MonadState GState m => ConstantDirect -> m Unit
-aload x = i8 (LOAD ILFDA_A) x
+loadString :: forall m. MonadThrow GenError m => MonadState GState m => String -> m Unit
+loadString str = ldc1 (CString str)
+
+-- Broken, iload works on the local stack variable, not on the constant pool
+--
+-- iload :: forall m. MonadThrow GenError m => MonadState GState m => ConstantDirect -> m Unit
+-- iload x = i8 (LOAD ILFDA_I) x
+-- lload :: forall m. MonadThrow GenError m => MonadState GState m => ConstantDirect -> m Unit
+-- lload x = i8 (LOAD ILFDA_L) x
+-- fload :: forall m. MonadThrow GenError m => MonadState GState m => ConstantDirect -> m Unit
+-- fload x = i8 (LOAD ILFDA_F) x
+-- dload :: forall m. MonadThrow GenError m => MonadState GState m => ConstantDirect -> m Unit
+-- dload x = i8 (LOAD ILFDA_D) x
+-- aload :: forall m. MonadThrow GenError m => MonadState GState m => ConstantDirect -> m Unit
+-- aload x = i8 (LOAD ILFDA_A) x
 
 iload_ :: forall m. MonadState GState m => IMM -> m Unit
 iload_ x = i0 (LOAD_ ILFDA_I x)
@@ -94,16 +99,18 @@ caload = i0 $ ALOAD JTA_C
 saload :: forall m. MonadState GState m => m Unit
 saload = i0 $ ALOAD JTA_S
 
-istore :: forall m. MonadThrow GenError m => MonadState GState m => ConstantDirect -> m Unit
-istore x = i8 (STORE ILFDA_I) x
-lstore :: forall m. MonadThrow GenError m => MonadState GState m => ConstantDirect -> m Unit
-lstore x = i8 (STORE ILFDA_L) x
-fstore :: forall m. MonadThrow GenError m => MonadState GState m => ConstantDirect -> m Unit
-fstore x = i8 (STORE ILFDA_F) x
-dstore :: forall m. MonadThrow GenError m => MonadState GState m => ConstantDirect -> m Unit
-dstore x = i8 (STORE ILFDA_D) x
-astore :: forall m. MonadThrow GenError m => MonadState GState m => ConstantDirect -> m Unit
-astore x = i8 (STORE ILFDA_A) x
+-- Broken, istore works on the local stack variable, not on the constant pool
+--
+-- istore :: forall m. MonadThrow GenError m => MonadState GState m => ConstantDirect -> m Unit
+-- istore x = i8 (STORE ILFDA_I) x
+-- lstore :: forall m. MonadThrow GenError m => MonadState GState m => ConstantDirect -> m Unit
+-- lstore x = i8 (STORE ILFDA_L) x
+-- fstore :: forall m. MonadThrow GenError m => MonadState GState m => ConstantDirect -> m Unit
+-- fstore x = i8 (STORE ILFDA_F) x
+-- dstore :: forall m. MonadThrow GenError m => MonadState GState m => ConstantDirect -> m Unit
+-- dstore x = i8 (STORE ILFDA_D) x
+-- astore :: forall m. MonadThrow GenError m => MonadState GState m => ConstantDirect -> m Unit
+-- astore x = i8 (STORE ILFDA_A) x
 
 istore_ :: forall m. MonadState GState m => IMM -> m Unit
 istore_ x = i0 (STORE_ ILFDA_I x)
@@ -266,13 +273,13 @@ dcmp :: forall m. MonadState GState m => CMP -> m Unit
 dcmp cmp = i0 $ DCMP cmp
 
 -- | Wide instruction
-wide :: forall m. MonadThrow GenError m => MonadState GState m => (Word8 -> Instruction) -> ConstantDirect -> m Unit
-wide fn c = do
-  (Word16 ixu) <- addToPool c
-  let ix = toInt ixu
-      ix0 = Word8 $ fromInt $ ix `div` 256
-      ix1 = Word8 $ fromInt $ ix `mod` 256
-  i0 $ WIDE ix0 $ fn ix1
+-- wide :: forall m. MonadThrow GenError m => MonadState GState m => (Word8 -> Instruction) -> ConstantDirect -> m Unit
+-- wide fn c = do
+--   (Word16 ixu) <- addToPool c
+--   let ix = toInt ixu
+--       ix0 = Word8 $ fromInt $ ix `div` 256
+--       ix1 = Word8 $ fromInt $ ix `mod` 256
+--   i0 $ WIDE ix0 $ fn ix1
 
 new :: forall m. MonadThrow GenError m => MonadState GState m => String -> m Unit
 new cls =
@@ -301,10 +308,6 @@ invokeSpecial cls sig =
 getStaticField :: forall m. MonadThrow GenError m => MonadState GState m => String -> FieldNameType -> m Unit
 getStaticField cls sig =
   i1 GETSTATIC (CField cls sig)
-
-loadString :: forall m. MonadThrow GenError m => MonadState GState m => String -> m Unit
-loadString str =
-  i8 LDC1 (CString str)
 
 allocArray :: forall m. MonadThrow GenError m => MonadState GState m => String -> m Unit
 allocArray cls =

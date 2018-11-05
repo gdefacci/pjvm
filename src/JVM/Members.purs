@@ -31,7 +31,7 @@ data FieldType =
   | ShortInt   -- ^ S
   | BoolType   -- ^ Z
   | ObjectType String -- ^ L @{class name}@
-  | Array (Maybe Int) FieldType -- ^ @[{type}@
+  | ArrayType (Maybe Int) FieldType -- ^ @[{type}@
 
 derive instance eqFieldType :: Eq FieldType
 
@@ -45,8 +45,8 @@ instance showFieldType :: Show FieldType where
   show ShortInt = "short"
   show BoolType = "bool"
   show (ObjectType s) = "Object " <> s
-  show (Array Nothing t) = show t <> "[]"
-  show (Array (Just n) t) = show t <> "[" <> show n <> "]"
+  show (ArrayType Nothing t) = show t <> "[]"
+  show (ArrayType (Just n) t) = show t <> "[" <> show n <> "]"
 
 -- | Return value signature
 data ReturnSignature =
@@ -159,8 +159,8 @@ instance binaryFieldType :: Binary FieldType where
   put ShortInt   = put 'S'
   put BoolType   = put 'Z'
   put (ObjectType name)    = put 'L' <> putFoldable (toCharArray name) <> put ';'
-  put (Array Nothing sig)  = put '[' <> put sig
-  put (Array (Just n) sig) = put '[' <> put (show n) <> put sig
+  put (ArrayType Nothing sig)  = put '[' <> put sig
+  put (ArrayType (Just n) sig) = put '[' <> put (show n) <> put sig
 
   get = do
     b <- getChar8
@@ -179,7 +179,7 @@ instance binaryFieldType :: Binary FieldType where
       '[' -> do
              mbSize <- getInt
              sig <- get
-             pure (Array mbSize sig)
+             pure (ArrayType mbSize sig)
       _   -> fail $ \offset -> GenericParserError { offset, message: "Unknown signature"}
 
 instance binaryReturnSignature :: Binary ReturnSignature where

@@ -3,9 +3,7 @@ module JVM.ConverterTest where
 import Prelude
 
 import Data.Array as A
-import Data.ArrayBuffer.Types (ArrayBuffer)
-import Data.Binary.Binary (get, put)
-import Data.Binary.Decoder (decodeFull)
+import Data.Binary.Binary (put)
 import Data.Binary.Put (runPut)
 import Data.Binary.Types (Float32(..), Float64(..))
 import Data.Either (fromRight, isLeft, isRight)
@@ -16,12 +14,11 @@ import Effect.Aff (Aff)
 import Effect.Class (liftEffect)
 import Effect.Class.Console (log)
 import Global (isNaN)
-import JVM.ClassFile (Class(..), ClassDirect(..), ClassFile)
+import JVM.ClassFile (Class(..), ClassDirect(..))
 import JVM.ConstantPool (Constant(..), PoolDirect)
 import JVM.Converter.ToDirect (classFile2Direct)
 import JVM.Converter.ToFile (classDirect2File)
-import Node.Buffer (toArrayBuffer) as ND
-import Node.FS.Aff (readFile, readdir) as ND
+import Node.FS.Aff (readdir) as ND
 import Node.FS.Stats (isDirectory) as ND
 import Node.FS.Sync (stat) as ND
 import Node.Path (FilePath)
@@ -29,16 +26,7 @@ import Node.Path as Path
 import Partial.Unsafe (unsafePartial)
 import Test.Unit (TestSuite, test)
 import Test.Unit.Assert as Assert
-import TestHelper (bufferEquals, bufferToArray)
-
-readClassFile :: String -> Aff (Tuple ClassFile ArrayBuffer)
-readClassFile path =
-  do
-    log $ "Reading class " <> path
-    buff <- ND.readFile path
-    ab <- liftEffect $ ND.toArrayBuffer buff
-    (clss :: ClassFile) <- decodeFull get ab
-    pure (Tuple clss ab)
+import TestHelper (bufferEquals, readClassFile)
 
 testToFileReadWrite :: String -> Aff Unit
 testToFileReadWrite path =
@@ -46,14 +34,6 @@ testToFileReadWrite path =
     (Tuple clss ab) <- readClassFile path
     let classFilePut = put clss
     resArr <- runPut classFilePut
-    when (not $ resArr `bufferEquals` ab) do
-      let arr1 = bufferToArray resArr
-          arr2 = bufferToArray ab
-      log $ "len 1 " <> (show $ A.length arr1)
-      log $ "len 2 " <> (show $ A.length arr2)
-      log $ show $ arr1
-      log "============="
-      log $ show $ arr2
     Assert.assert (show path) $ resArr `bufferEquals` ab
 
 constPoolWithoutNaNs :: PoolDirect -> PoolDirect
@@ -91,7 +71,6 @@ testToDirectReadWrite path =
 base :: Array String
 base = [".", "test", "resources", "testclasses"]
 
--- allClasses :: (Array String) -> Aff FilePath
 allClasses :: Array FilePath -> Aff (Array FilePath)
 allClasses folder = do
   content <- ND.readdir $ Path.concat folder

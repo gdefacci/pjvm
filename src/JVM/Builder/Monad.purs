@@ -5,7 +5,7 @@ import Prelude
 import Control.Monad.Error.Class (class MonadError, class MonadThrow, throwError)
 import Control.Monad.Except (ExceptT, runExceptT)
 import Control.Monad.Rec.Class (class MonadRec)
-import Control.Monad.State (class MonadState, StateT, execStateT)
+import Control.Monad.State (class MonadState, StateT, execStateT, runState, runStateT)
 import Control.Monad.State as ST
 import Data.Array as A
 import Data.Binary.Binary (class Binary, put)
@@ -26,11 +26,19 @@ import JVM.Flags (AccessFlag(..), MethodAccessFlag)
 import JVM.Instruction (Instruction)
 import JVM.Members (FieldNameType(..), FieldType, Method(..), MethodDirect(..), MethodNameType(..), MethodSignature(..), ReturnSignature)
 
+newtype Label = Label Int
+
+derive instance eqLabel :: Eq Label
+derive instance ordLabel :: Ord Label
+
 newtype MethodState = MethodState {
-  code :: Array Instruction,          -- ^ Already generated code (in current method)
+  code :: Array Instruction,        -- ^ Already generated code (in current method)
   method :: MethodDirect,           -- ^ Current method
-  stackSize :: Word16,                     -- ^ Maximum stack size for current method
-  localsSize :: Word16                         -- ^ Maximum number of local variables for current method
+  stackSize :: Word16,              -- ^ Maximum stack size for current method
+  localsSize :: Word16,             -- ^ Maximum number of local variables for current method
+
+  nextLabel :: Int,
+  labelsMap :: M.Map Label Word16
 }
 
 newtype GState = GState {
@@ -39,15 +47,13 @@ newtype GState = GState {
   doneMethods :: Array (MethodDirect),     -- ^ Already generated class methods
 
   currentMethod :: Maybe MethodState
-  -- generated :: Array Instruction,          -- ^ Already generated code (in current method)
-  -- currentMethod :: Maybe (MethodDirect),   -- ^ Current method
-  -- stackSize :: Word16,                     -- ^ Maximum stack size for current method
-  -- locals :: Word16                         -- ^ Maximum number of local variables for current method
   }
 
 newtype Generate e m a = Generate ( ExceptT e (StateT GState m) a  )
 
-data GenError = EncodeError String | UnexpectedEndMethod | GenGenericError String
+type Description = String
+
+data GenError = EncodeError String | OutsideMethod Description
 
 derive newtype instance functorGenerate :: Functor m => Functor (Generate e m)
 derive newtype instance applyGenerate :: Monad m => Apply (Generate e m)
@@ -65,13 +71,10 @@ execGenerate (Generate m) =
   execStateT (runExceptT m) emptyGState
   where
     emptyGState = GState {
-      -- generated : [],
       currentPool : M.empty,
       nextPoolIndex : Word16 $ fromInt 1,
       doneMethods : [],
       currentMethod : Nothing
-      -- stackSize : Word16 $ fromInt 496,
-      -- locals : Word16 $ fromInt 0
       }
 
 -- | Lookup in the pool
@@ -148,10 +151,8 @@ addToPool c = addItem c
 putInstruction :: forall m. MonadThrow GenError m => MonadState GState m => Instruction -> m Unit
 putInstruction instr = do
   (GState st) <- ST.get
-  withCurrentMethod "putInstruction" (\(MethodState mthdState @ {code}) ->
-    ST.put $ GState $ st { currentMethod = Just $ MethodState $ mthdState { code = A.snoc code instr } })
-
-  -- ST.modify_ $ \(GState st @ {generated}) -> GState $ st { generated = A.snoc generated instr }
+  (MethodState mthdState @ {code}) <- getCurrentMethod "putInstruction"
+  ST.put $ GState $ st { currentMethod = Just $ MethodState $ mthdState { code = A.snoc code instr } }
 
 -- | Generate one (zero-arguments) instruction
 i0 :: forall m. MonadThrow GenError m => MonadState GState m => Instruction -> m Unit
@@ -178,28 +179,39 @@ i8 :: forall m. MonadThrow GenError m
                 -> m Unit
 i8 fn = i1 (word16ToWord8 >>> fn)
 
-type Description = String
 
-withCurrentMethod :: forall m a. MonadThrow GenError m => MonadState GState m => Description -> (MethodState -> m a) -> m a
-withCurrentMethod desc f = do
+
+newLabel :: forall m. MonadThrow GenError m => MonadState GState m => m Label
+newLabel = do
+  (GState st) <- ST.get
+  (MethodState ms) <- getCurrentMethod "newLabel"
+  let {nextLabel} = ms
+  ST.put (GState st { currentMethod = Just $ MethodState $ ms {nextLabel = nextLabel + 1}} )
+  pure $ Label nextLabel
+
+-- newBlock :: forall m a. MonadThrow GenError m => MonadState GState m => Label -> m a -> m a
+-- newBlock label
+
+getCurrentMethod :: forall m. MonadThrow GenError m => MonadState GState m => Description -> m MethodState
+getCurrentMethod desc = do
   (GState {currentMethod}) <- ST.get
   case currentMethod of
-    Just cm -> f cm
-    _ -> throwError $ GenGenericError (desc <> " outside method")
+    Just cm -> pure cm
+    _ -> throwError $ OutsideMethod desc
 
 -- | Set maximum stack size for current method
 setStackSize :: forall m. MonadThrow GenError m => MonadState GState m => Word16 -> m Unit
 setStackSize n = do
   (GState st) <- ST.get
-  withCurrentMethod "setStackSize" (\(MethodState mthdState) ->
-    ST.put $ GState $ st { currentMethod = Just $ MethodState $ mthdState { stackSize = n } })
+  (MethodState mthdState) <- getCurrentMethod "setStackSize"
+  ST.put $ GState $ st { currentMethod = Just $ MethodState $ mthdState { stackSize = n } }
 
 -- | Set maximum number of local variables for current method
 setMaxLocals :: forall m. MonadThrow GenError m => MonadState GState m => Word16 -> m Unit
 setMaxLocals n = do
   (GState st) <- ST.get
-  withCurrentMethod "setMaxLocals" (\(MethodState mthdState) ->
-    ST.put $ GState $ st { currentMethod = Just $ MethodState $ mthdState { localsSize = n } })
+  (MethodState mthdState) <- getCurrentMethod "setMaxLocals"
+  ST.put $ GState $ st { currentMethod = Just $ MethodState $ mthdState { localsSize = n } }
 
 -- | Start generating new method
 startMethod :: forall m. MonadThrow GenError m
@@ -227,26 +239,25 @@ startMethod {stackSize, maxLocals} flags methodName methodSignature = do
   ST.put $ GState $ st { currentMethod = Just $ defaultMethodState method }
 
 -- | End of method generation
-endMethod :: forall m. MonadState GState m => MonadThrow GenError m => m Unit
+endMethod :: forall m. MonadThrow GenError m => MonadState GState m => MonadThrow GenError m => m Unit
 endMethod = do
   (st @ GState { currentMethod:m }) <- ST.get
-  case m of
-    Nothing -> throwError UnexpectedEndMethod
-    (Just (MethodState { method : MethodDirect (Method method) }))  -> do
-      code <- genCode st
-      let method' = MethodDirect $ Method $ method
-            { methodAttributes = AttributesDirect $ [(Tuple "Code" $ encodeMethod code)]
-            , methodAttributesCount = Word16 $ fromInt 1 }
-      ST.modify_ $ \(GState st1 @ {doneMethods}) -> GState $
-        st1 { currentMethod = Nothing
-            , doneMethods = A.snoc doneMethods method'}
+  (MethodState { method : MethodDirect (Method method) }) <- getCurrentMethod "endMethod"
+  code <- genCode
+  let method' = MethodDirect $ Method $ method
+        { methodAttributes = AttributesDirect $ [(Tuple "Code" $ encodeMethod code)]
+        , methodAttributesCount = Word16 $ fromInt 1 }
+  ST.modify_ $ \(GState st1 @ {doneMethods}) -> GState $
+    st1 { currentMethod = Nothing
+        , doneMethods = A.snoc doneMethods method'}
 
 encodedCodeLength :: (Array Instruction) -> Word32
 encodedCodeLength = Word32 <<< fromInt <<< A.length <<< encodeInstructions
 
-genCode :: forall m. MonadThrow GenError m => GState -> m Code
-genCode st @ (GState st1 @ { currentMethod : Just (MethodState {stackSize, localsSize, code}) }) =
-    pure $ Code
+genCode :: forall m. MonadThrow GenError m => MonadState GState m => m Code
+genCode = do
+  (MethodState {stackSize, localsSize, code}) <- getCurrentMethod "genCode"
+  pure $ Code
       { codeStackSize : stackSize
       , codeMaxLocals : localsSize
       , codeLength : encodedCodeLength code
@@ -255,8 +266,6 @@ genCode st @ (GState st1 @ { currentMethod : Just (MethodState {stackSize, local
       , codeExceptions : []
       , codeAttrsN : Word16 $ fromInt 0
       , codeAttributes : AttributesFile [] }
-genCode _ =
-  throwError $ GenGenericError "genCode called outide method"
 
 -- | Generate new method
 newMethod :: forall m. MonadThrow GenError m
@@ -307,7 +316,9 @@ defaultMethodState mthd = MethodState {
   code : [],
   method : mthd,
   stackSize : Word16 $ fromInt 0,
-  localsSize : Word16 $ fromInt 0
+  localsSize : Word16 $ fromInt 0,
+  nextLabel : 0,
+  labelsMap : mempty
 }
 
 -- | Generate a class
@@ -320,7 +331,7 @@ generate name gen = do
         initClass name
         gen
   res @ (GState {currentPool, doneMethods}) <- execGenerate generator
-  code <- genCode res
+  (Tuple code _) <- runStateT genCode res
   let (ClassDirect (Class classDefault)) = defaultClass name
   pure $ ClassDirect $ Class $ classDefault
     { constsPoolSize = Word16 $ fromInt $ M.size currentPool

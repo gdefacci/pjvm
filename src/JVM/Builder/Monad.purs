@@ -83,8 +83,6 @@ derive newtype instance monadThrowGenerate :: Monad m => MonadThrow GenError (Ge
 derive newtype instance monadErrorGenerate :: Monad m => MonadError GenError (Generate GenError m)
 derive newtype instance monadRecGenerate :: MonadRec m => MonadRec (Generate GenError m)
 
--- execGenerate :: forall err m a . MonadError err m => Generate err m Unit -> m GState
-
 runGenerate :: forall err m a . MonadThrow err m => Generate err m a -> m (Tuple a GState)
 runGenerate (Generate m) =
   toResult =<< (runStateT (runExceptT m) emptyGState)
@@ -106,14 +104,14 @@ lookupPool c pool =
 -- | Add a constant to pool
 addItem :: forall m. MonadState GState m => ConstantDirect -> m Word16
 addItem c = do
-  (GState cuurentState @ {currentPool : pool, nextPoolIndex: wi @(Word16 i)}) <- ST.get
+  (GState currentState @ {currentPool : pool, nextPoolIndex: wi @(Word16 i)}) <- ST.get
   case lookupPool c pool of
     (Just r) -> pure r
     Nothing -> do
       let constSize = if long c then 2 else 1
           pool' = M.insert wi c pool
           i' = Word16 $ fromInt $ (toInt i) + constSize
-      ST.put $ GState $ cuurentState {currentPool = pool', nextPoolIndex = i'}
+      ST.put $ GState $ currentState {currentPool = pool', nextPoolIndex = i'}
       pure wi
 
 encode :: forall m a. MonadThrow GenError m => Binary a => Show a => a -> m String
@@ -171,9 +169,9 @@ addToPool c = addItem c
 
 putInstruction :: forall m. MonadThrow GenError m => MonadState GState m => Instruction -> m Unit
 putInstruction instr = do
-  (GState st) <- ST.get
   (MethodState mthdState @ {code}) <- getCurrentMethod "putInstruction"
-  ST.put $ GState $ st { currentMethod = Just $ MethodState $ mthdState { code = A.snoc code instr } }
+  ST.modify_ $ \(GState st) ->
+    GState $ st { currentMethod = Just $ MethodState $ mthdState { code = A.snoc code instr } }
 
 -- | Generate one (zero-arguments) instruction
 i0 :: forall m. MonadThrow GenError m => MonadState GState m => Instruction -> m Unit
@@ -202,14 +200,10 @@ i8 fn = i1 (word16ToWord8 >>> fn)
 
 newLabel :: forall m. MonadThrow GenError m => MonadState GState m => m Label
 newLabel = do
-  (GState st) <- ST.get
   (MethodState ms) <- getCurrentMethod "newLabel"
   let {nextLabel} = ms
-  ST.put (GState st { currentMethod = Just $ MethodState $ ms {nextLabel = nextLabel + 1}} )
+  ST.modify_ $ \(GState st) -> GState st { currentMethod = Just $ MethodState $ ms {nextLabel = nextLabel + 1}}
   pure $ Label nextLabel
-
--- newBlock :: forall m a. MonadThrow GenError m => MonadState GState m => Label -> m a -> m a
--- newBlock label
 
 getCurrentMethod :: forall m. MonadThrow GenError m => MonadState GState m => Description -> m MethodState
 getCurrentMethod desc = do
@@ -221,16 +215,14 @@ getCurrentMethod desc = do
 -- | Set maximum stack size for current method
 setStackSize :: forall m. MonadThrow GenError m => MonadState GState m => Word16 -> m Unit
 setStackSize n = do
-  (GState st) <- ST.get
   (MethodState mthdState) <- getCurrentMethod "setStackSize"
-  ST.put $ GState $ st { currentMethod = Just $ MethodState $ mthdState { stackSize = n } }
+  ST.modify_ $ \(GState st) -> GState $ st { currentMethod = Just $ MethodState $ mthdState { stackSize = n } }
 
 -- | Set maximum number of local variables for current method
 setMaxLocals :: forall m. MonadThrow GenError m => MonadState GState m => Word16 -> m Unit
 setMaxLocals n = do
-  (GState st) <- ST.get
   (MethodState mthdState) <- getCurrentMethod "setMaxLocals"
-  ST.put $ GState $ st { currentMethod = Just $ MethodState $ mthdState { localsSize = n } }
+  ST.modify_ $ \(GState st) -> GState $ st { currentMethod = Just $ MethodState $ mthdState { localsSize = n } }
 
 -- | Start generating new method
 startMethod :: forall m. MonadThrow GenError m
@@ -243,7 +235,6 @@ startMethod :: forall m. MonadThrow GenError m
 startMethod {stackSize, maxLocals} flags methodName methodSignature = do
   _ <- addToPool (CString methodName)
   _ <- addSig methodSignature
-  (GState st) <- ST.get
   let methodAttributesCount = Word16 $ fromInt 0
       methodAttributes = AttributesDirect []
       method = MethodDirect $ Method
@@ -253,7 +244,7 @@ startMethod {stackSize, maxLocals} flags methodName methodSignature = do
         , methodAttributesCount
         , methodAttributes
         }
-  ST.put $ GState $ st { currentMethod = Just $ defaultMethodState method }
+  ST.modify_ $ \(GState st) -> GState $ st { currentMethod = Just $ defaultMethodState method }
   _ <- setStackSize $ Word16 $ fromInt stackSize
   void $ setMaxLocals $ Word16 $ fromInt maxLocals
 

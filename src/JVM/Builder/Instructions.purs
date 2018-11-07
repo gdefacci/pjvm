@@ -81,7 +81,7 @@ fload_ x = i0 (LOAD_ ILFDA_F x)
 dload_ :: forall m. MonadThrow GenError m => MonadState GState m => IMM -> m Unit
 dload_ x = i0 (LOAD_ ILFDA_D x)
 aload_ :: forall m. MonadThrow GenError m => MonadState GState m => IMM -> m Unit
-aload_ x = i0 (LOAD_ ILFDA_I x)
+aload_ x = i0 (LOAD_ ILFDA_A x)
 
 iaload :: forall m. MonadThrow GenError m => MonadState GState m => m Unit
 iaload = i0 $ ALOAD JTA_I

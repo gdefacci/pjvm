@@ -5,7 +5,7 @@ import Prelude
 import Control.Monad.Error.Class (class MonadThrow)
 import Control.Monad.State (class MonadState)
 import Data.Binary.Types (Word16(..))
-import Data.Either (fromRight)
+import Data.Either (Either, fromRight)
 import Data.Maybe (Maybe(..))
 import Data.UInt (fromInt)
 import Effect (Effect)
@@ -13,6 +13,7 @@ import Effect.Aff (launchAff_)
 import Effect.Class.Console (log)
 import JVM.Builder.Instructions (aastore, allocArray, aload_, dup, getStaticField, iconst_0, iconst_1, iconst_5, iload_, invokeSpecial, invokeStatic, invokeVirtual, loadString, pop)
 import JVM.Builder.Monad (GState, GenError, generate, i0, newMethod, setStackSize)
+import JVM.ClassFile (ClassDirect)
 import JVM.Converter.ToFile (classDirect2File)
 import JVM.Flags (MethodAccessFlag(..))
 import JVM.Instruction (IMM(..), Instruction(..))
@@ -38,13 +39,15 @@ stringClass = ObjectType "java/lang/String"
 printStreamClass :: FieldType
 printStreamClass = ObjectType "java/io/PrintStream"
 
+objectClass :: FieldType
+objectClass = ObjectType "java/lang/Object"
+
 printf :: MethodNameType
 printf = methodNameType "printf" $  MethodSignature
-             [stringClass, ArrayType Nothing $ ObjectType "java/lang/Object"] (Returns $ printStreamClass)
+             [stringClass, ArrayType Nothing $ objectClass] (Returns $ printStreamClass)
 
-test :: forall m. MonadThrow GenError m => MonadState GState m => m Unit
-test = do
-
+testGen :: forall m. MonadThrow GenError m => MonadState GState m => m Unit
+testGen = do
   -- Initializer method. Just calls java.lang.Object.<init>
   _ <- newMethod defaultStack [M_PUBLIC] "<init>" [] ReturnsVoid $ do
       setStackSize $ Word16 $ fromInt 1
@@ -89,11 +92,10 @@ test = do
 
 main :: Effect Unit
 main = launchAff_ $ do
-  log "========================= 1"
-  let testClassDirectEither = generate "Test" test
-      testClassDirect = unsafePartial $ fromRight testClassDirectEither
-  log "========================= 2"
+  let testClassDirectEither :: Either GenError ClassDirect
+      testClassDirectEither = generate "Test" testGen
+  log $ show testClassDirectEither
+  let testClassDirect = unsafePartial $ fromRight testClassDirectEither
   let testClassEither = classDirect2File testClassDirect
       testClass = unsafePartial $ fromRight testClassEither
-  log "========================= 3"
   writeClassFile "Test.class" testClass

@@ -5,17 +5,20 @@ import Prelude
 import Control.Monad.Error.Class (class MonadError, class MonadThrow, throwError)
 import Control.Monad.Except (ExceptT, runExceptT)
 import Control.Monad.Rec.Class (class MonadRec)
-import Control.Monad.State (class MonadState, StateT, execStateT, runState, runStateT)
+import Control.Monad.State (class MonadState, StateT, runStateT)
 import Control.Monad.State as ST
 import Data.Array as A
 import Data.Binary.Binary (class Binary, put)
 import Data.Binary.Put (putToString)
 import Data.Binary.Types (Word16(..), Word32(..), Word8(..))
+import Data.Either (Either(..))
 import Data.FoldableWithIndex (findWithIndex)
+import Data.Generic.Rep (class Generic)
+import Data.Generic.Rep.Show (genericShow)
 import Data.Map as M
 import Data.Maybe (Maybe(..))
 import Data.Set as S
-import Data.Tuple (Tuple(..))
+import Data.Tuple (Tuple(..), snd)
 import Data.UInt (fromInt, toInt)
 import Effect.Class (class MonadEffect)
 import JVM.Assembler (Code(..), encodeInstructions, encodeMethod)
@@ -31,22 +34,20 @@ newtype Label = Label Int
 derive instance eqLabel :: Eq Label
 derive instance ordLabel :: Ord Label
 
-newtype MethodState = MethodState {
-  code :: Array Instruction,        -- ^ Already generated code (in current method)
-  method :: MethodDirect,           -- ^ Current method
-  stackSize :: Word16,              -- ^ Maximum stack size for current method
-  localsSize :: Word16,             -- ^ Maximum number of local variables for current method
-
-  nextLabel :: Int,
-  labelsMap :: M.Map Label Word16
+newtype MethodState = MethodState
+  { code :: Array Instruction        -- ^ Already generated code (in current method)
+  , method :: MethodDirect           -- ^ Current method
+  , stackSize :: Word16              -- ^ Maximum stack size for current method
+  , localsSize :: Word16             -- ^ Maximum number of local variables for current method
+  , nextLabel :: Int
+  , labelsMap :: M.Map Label Word16
 }
 
-newtype GState = GState {
-  currentPool :: PoolDirect,               -- ^ Already generated constants pool
-  nextPoolIndex :: Word16,                 -- ^ Next index to be used in constants pool
-  doneMethods :: Array (MethodDirect),     -- ^ Already generated class methods
-
-  currentMethod :: Maybe MethodState
+newtype GState = GState
+  { currentPool :: PoolDirect               -- ^ Already generated constants pool
+  , nextPoolIndex :: Word16                 -- ^ Next index to be used in constants pool
+  , doneMethods :: Array (MethodDirect)     -- ^ Already generated class methods
+  , currentMethod :: Maybe MethodState
   }
 
 newtype Generate e m a = Generate ( ExceptT e (StateT GState m) a  )
@@ -54,6 +55,22 @@ newtype Generate e m a = Generate ( ExceptT e (StateT GState m) a  )
 type Description = String
 
 data GenError = EncodeError String | OutsideMethod Description
+
+instance showGenError :: Show GenError where
+  show (EncodeError err) = "EncodeError " <> err
+  show (OutsideMethod err) = "OutsideMethod " <> err
+
+instance showLabel :: Show Label where
+  show (Label n) = "Label " <> show n
+
+derive instance genericGState :: Generic GState _
+derive instance genericMethodState :: Generic MethodState _
+
+instance showMethdState :: Show MethodState where
+  show = genericShow
+
+instance showGState :: Show GState where
+  show = genericShow
 
 derive newtype instance functorGenerate :: Functor m => Functor (Generate e m)
 derive newtype instance applyGenerate :: Monad m => Apply (Generate e m)
@@ -66,10 +83,14 @@ derive newtype instance monadThrowGenerate :: Monad m => MonadThrow GenError (Ge
 derive newtype instance monadErrorGenerate :: Monad m => MonadError GenError (Generate GenError m)
 derive newtype instance monadRecGenerate :: MonadRec m => MonadRec (Generate GenError m)
 
-execGenerate :: forall e m a. Functor m => Generate e m a -> m GState
-execGenerate (Generate m) =
-  execStateT (runExceptT m) emptyGState
+-- execGenerate :: forall err m a . MonadError err m => Generate err m Unit -> m GState
+
+runGenerate :: forall err m a . MonadThrow err m => Generate err m a -> m (Tuple a GState)
+runGenerate (Generate m) =
+  toResult =<< (runStateT (runExceptT m) emptyGState)
   where
+    toResult (Tuple (Left err) _) = throwError err
+    toResult (Tuple (Right a) st) = pure $ Tuple a st
     emptyGState = GState {
       currentPool : M.empty,
       nextPoolIndex : Word16 $ fromInt 1,
@@ -179,8 +200,6 @@ i8 :: forall m. MonadThrow GenError m
                 -> m Unit
 i8 fn = i1 (word16ToWord8 >>> fn)
 
-
-
 newLabel :: forall m. MonadThrow GenError m => MonadState GState m => m Label
 newLabel = do
   (GState st) <- ST.get
@@ -224,8 +243,6 @@ startMethod :: forall m. MonadThrow GenError m
 startMethod {stackSize, maxLocals} flags methodName methodSignature = do
   _ <- addToPool (CString methodName)
   _ <- addSig methodSignature
-  _ <- setStackSize $ Word16 $ fromInt stackSize
-  _ <- setMaxLocals $ Word16 $ fromInt maxLocals
   (GState st) <- ST.get
   let methodAttributesCount = Word16 $ fromInt 0
       methodAttributes = AttributesDirect []
@@ -237,11 +254,12 @@ startMethod {stackSize, maxLocals} flags methodName methodSignature = do
         , methodAttributes
         }
   ST.put $ GState $ st { currentMethod = Just $ defaultMethodState method }
+  _ <- setStackSize $ Word16 $ fromInt stackSize
+  void $ setMaxLocals $ Word16 $ fromInt maxLocals
 
 -- | End of method generation
 endMethod :: forall m. MonadThrow GenError m => MonadState GState m => MonadThrow GenError m => m Unit
 endMethod = do
-  (st @ GState { currentMethod:m }) <- ST.get
   (MethodState { method : MethodDirect (Method method) }) <- getCurrentMethod "endMethod"
   code <- genCode
   let method' = MethodDirect $ Method $ method
@@ -330,8 +348,7 @@ generate name gen = do
   let generator = do
         initClass name
         gen
-  res @ (GState {currentPool, doneMethods}) <- execGenerate generator
-  (Tuple code _) <- runStateT genCode res
+  res @ (GState {currentPool, doneMethods}) <- snd <$> (runGenerate generator)
   let (ClassDirect (Class classDefault)) = defaultClass name
   pure $ ClassDirect $ Class $ classDefault
     { constsPoolSize = Word16 $ fromInt $ M.size currentPool

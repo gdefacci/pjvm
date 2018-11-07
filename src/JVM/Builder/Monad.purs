@@ -205,6 +205,13 @@ newLabel = do
   ST.modify_ $ \(GState st) -> GState st { currentMethod = Just $ MethodState $ ms {nextLabel = nextLabel + 1}}
   pure $ Label nextLabel
 
+newBlock :: forall m a. MonadThrow GenError m => MonadState GState m => Label -> m a -> m a
+newBlock label block = do
+  (MethodState ms @ {code, labelsMap}) <- getCurrentMethod "newBlock"
+  let newLabelsMap = M.insert label (Word16 $ fromInt $ codeBytesLength code) labelsMap
+  ST.modify_ $ \(GState st) -> GState $ st { currentMethod = Just $ MethodState $ ms { labelsMap = newLabelsMap }}
+  block
+
 getCurrentMethod :: forall m. MonadThrow GenError m => MonadState GState m => Description -> m MethodState
 getCurrentMethod desc = do
   (GState {currentMethod}) <- ST.get
@@ -260,8 +267,8 @@ endMethod = do
     st1 { currentMethod = Nothing
         , doneMethods = A.snoc doneMethods method'}
 
-encodedCodeLength :: (Array Instruction) -> Word32
-encodedCodeLength = Word32 <<< fromInt <<< A.length <<< encodeInstructions
+codeBytesLength :: (Array Instruction) -> Int
+codeBytesLength = A.length <<< encodeInstructions
 
 genCode :: forall m. MonadThrow GenError m => MonadState GState m => m Code
 genCode = do
@@ -269,7 +276,7 @@ genCode = do
   pure $ Code
       { codeStackSize : stackSize
       , codeMaxLocals : localsSize
-      , codeLength : encodedCodeLength code
+      , codeLength : Word32 $ fromInt $ codeBytesLength code
       , codeInstructions : code
       , codeExceptionsN : Word16 $ fromInt 0
       , codeExceptions : []

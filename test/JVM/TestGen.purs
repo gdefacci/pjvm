@@ -17,14 +17,14 @@ import JVM.ClassFile (ClassDirect)
 import JVM.Converter.ToFile (classDirect2File)
 import JVM.Flags (MethodAccessFlag(..))
 import JVM.Instruction (IMM(..), Instruction(..))
-import JVM.Members (FieldNameType(..), FieldType(..), MethodNameType(..), MethodSignature(..), ReturnSignature(..))
+import JVM.Members (FieldNameType(..), JVMType(..), MethodNameType(..), MethodSignature(..), ReturnSignature(..))
 import Partial.Unsafe (unsafePartial)
 import TestHelper (writeClassFile)
 
 methodNameType :: String -> MethodSignature -> MethodNameType
 methodNameType ntName ntSignature = MethodNameType {ntName, ntSignature}
 
-fieldNameType :: String -> FieldType -> FieldNameType
+fieldNameType :: String -> JVMType -> FieldNameType
 fieldNameType ntName ntSignature = FieldNameType {ntName, ntSignature}
 
 defaultStack :: { stackSize :: Int , maxLocals :: Int}
@@ -33,13 +33,13 @@ defaultStack = { stackSize : 32, maxLocals : 32 }
 objectInit :: MethodNameType
 objectInit = methodNameType "<init>" $ MethodSignature [] ReturnsVoid
 
-stringClass :: FieldType
+stringClass :: JVMType
 stringClass = ObjectType "java/lang/String"
 
-printStreamClass :: FieldType
+printStreamClass :: JVMType
 printStreamClass = ObjectType "java/io/PrintStream"
 
-objectClass :: FieldType
+objectClass :: JVMType
 objectClass = ObjectType "java/lang/Object"
 
 printf :: MethodNameType

@@ -21,7 +21,7 @@ import JVM.Attributes (AttributesDirect, AttributesFile(..), attributesList)
 import JVM.Flags (FieldAccessFlag, MethodAccessFlag)
 
 -- | Field signature format
-data FieldType =
+data JVMType =
     SignedByte -- ^ B
   | CharByte   -- ^ C
   | DoubleType -- ^ D
@@ -31,11 +31,11 @@ data FieldType =
   | ShortInt   -- ^ S
   | BoolType   -- ^ Z
   | ObjectType String -- ^ L @{class name}@
-  | ArrayType (Maybe Int) FieldType -- ^ @[{type}@
+  | ArrayType (Maybe Int) JVMType -- ^ @[{type}@
 
-derive instance eqFieldType :: Eq FieldType
+derive instance eqFieldType :: Eq JVMType
 
-instance showFieldType :: Show FieldType where
+instance showFieldType :: Show JVMType where
   show SignedByte = "byte"
   show CharByte = "char"
   show DoubleType = "double"
@@ -50,7 +50,7 @@ instance showFieldType :: Show FieldType where
 
 -- | Return value signature
 data ReturnSignature =
-    Returns FieldType
+    Returns JVMType
   | ReturnsVoid
 
 derive instance eqReturnSignature :: Eq ReturnSignature
@@ -61,7 +61,7 @@ instance showReturnSignature :: Show ReturnSignature where
 
 -- | Class method argument signature
 data MethodSignature =
-    MethodSignature (Array FieldType) ReturnSignature
+    MethodSignature (Array JVMType) ReturnSignature
 
 derive instance eqMethodSignature :: Eq MethodSignature
 
@@ -70,7 +70,7 @@ instance showMethodSignature :: Show MethodSignature where
 
 data FieldNameType = FieldNameType {
   ntName :: String,
-  ntSignature :: FieldType
+  ntSignature :: JVMType
 }
 
 derive instance repGenericFieldNameType :: Generic FieldNameType _
@@ -101,7 +101,7 @@ derive instance eqField :: (Eq flgs, Eq b, Eq fld, Eq attrs) => Eq (Field flgs b
 instance showField :: (Show flgs, Show b, Show fld, Show attrs) => Show (Field flgs b fld attrs) where
   show = genericShow
 
-newtype FieldDirect = FieldDirect (Field (S.Set FieldAccessFlag) String FieldType AttributesDirect)
+newtype FieldDirect = FieldDirect (Field (S.Set FieldAccessFlag) String JVMType AttributesDirect)
 newtype FieldFile = FieldFile (Field Word16 Word16 Word16 AttributesFile)
 
 derive instance repGenericFieldDirect :: Generic FieldDirect _
@@ -149,7 +149,7 @@ fieldNameType (FieldDirect (Field {fieldName, fieldSignature})) = FieldNameType
   , ntSignature : fieldSignature
   }
 
-instance binaryFieldType :: Binary FieldType where
+instance binaryFieldType :: Binary JVMType where
   put SignedByte = put 'B'
   put CharByte   = put 'C'
   put DoubleType = put 'D'
@@ -237,10 +237,10 @@ instance binaryMethodSignature :: Binary MethodSignature where
     pure $ MethodSignature args ret
 
 -- | Read arguments signatures (up to `)')
-getArgs :: forall m. Monad m => Decoder m (Array FieldType)
+getArgs :: forall m. Monad m => Decoder m (Array JVMType)
 getArgs = whileJust getArg
   where
-    getArg :: Decoder m (Maybe FieldType)
+    getArg :: Decoder m (Maybe JVMType)
     getArg = do
       x <- lookAhead $ getChar8
       if x == ')'

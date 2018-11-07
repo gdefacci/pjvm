@@ -27,7 +27,7 @@ import JVM.ClassFile (Class(..), ClassDirect(..), xCAFEBABE)
 import JVM.ConstantPool (Constant(..), ConstantDirect, PoolDirect, long)
 import JVM.Flags (AccessFlag(..), MethodAccessFlag)
 import JVM.Instruction (Instruction)
-import JVM.Members (FieldNameType(..), FieldType, Method(..), MethodDirect(..), MethodNameType(..), MethodSignature(..), ReturnSignature)
+import JVM.Members (FieldNameType(..), JVMType, Method(..), MethodDirect(..), MethodNameType(..), MethodSignature(..), ReturnSignature)
 
 newtype Label = Label Int
 
@@ -289,7 +289,7 @@ newMethod :: forall m. MonadThrow GenError m
           => { stackSize :: Int, maxLocals :: Int }
           -> Array MethodAccessFlag   -- ^ Access flags for method (public, static etc)
           -> String                   -- ^ Method name
-          -> Array FieldType          -- ^ Signatures of method arguments
+          -> Array JVMType          -- ^ Signatures of method arguments
           -> ReturnSignature          -- ^ Method return signature
           -> m Unit                   -- ^ Generator for method code
           -> m MethodNameType

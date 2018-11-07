@@ -19,10 +19,10 @@ import Data.UInt (fromInt)
 import JVM.Attributes (Attribute(..), AttributesDirect(..), AttributesFile(..))
 import JVM.ClassFile (Class(..), ClassDirect(..), ClassFile(..))
 import JVM.ConstantPool (Constant(..), PoolDirect, PoolFile)
-import JVM.Members (Field(..), FieldDirect(..), FieldFile(..), FieldNameType(..), FieldType, Method(..), MethodDirect(..), MethodFile(..), MethodNameType(..), MethodSignature(..))
+import JVM.Members (Field(..), FieldDirect(..), FieldFile(..), FieldNameType(..), JVMType, Method(..), MethodDirect(..), MethodFile(..), MethodNameType(..), MethodSignature(..))
 
 data Direct2FileError = NoItemInPool String
-                        | InvalidFieldSignature FieldType
+                        | InvalidFieldSignature JVMType
                         | InvalidMethodSignature MethodSignature
 
 derive instance genericDirect2FileError :: Generic Direct2FileError _

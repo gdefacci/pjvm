@@ -18,6 +18,7 @@ import Data.Generic.Rep.Show (genericShow)
 import Data.Map as M
 import Data.Maybe (Maybe(..), maybe)
 import Data.Set as S
+import Data.Traversable (traverse)
 import Data.Tuple (Tuple(..), snd)
 import Data.UInt (fromInt, toInt)
 import Effect.Class (class MonadEffect)
@@ -26,7 +27,7 @@ import JVM.Attributes (AttributesDirect(..), AttributesFile(..))
 import JVM.ClassFile (Class(..), ClassDirect(..), xCAFEBABE)
 import JVM.ConstantPool (Constant(..), ConstantDirect, PoolDirect, long)
 import JVM.Flags (AccessFlag(..), MethodAccessFlag)
-import JVM.Instruction (Instruction)
+import JVM.Instruction (Instruction(..), JumpOperation(..))
 import JVM.Members (FieldNameType(..), JVMType, Method(..), MethodDirect(..), MethodNameType(..), MethodSignature(..), ReturnSignature)
 
 newtype Label = Label Int
@@ -34,13 +35,24 @@ newtype Label = Label Int
 derive instance eqLabel :: Eq Label
 derive instance ordLabel :: Ord Label
 
+instance showLabel :: Show Label where
+  show (Label a) = "Label " <> show a
+
+data Instr = Instr Instruction | JumpInstr (JumpOperation Label Label)
+
+derive instance eqInstr :: Eq Instr
+
+instance showInstr :: Show Instr where
+  show (Instr a) = show a
+  show (JumpInstr a) = show a
+
 newtype MethodState = MethodState
-  { code :: Array Instruction        -- ^ Already generated code (in current method)
+  { code :: Array Instr              -- ^ Already generated code (in current method)
   , method :: MethodDirect           -- ^ Current method
   , stackSize :: Word16              -- ^ Maximum stack size for current method
   , localsSize :: Word16             -- ^ Maximum number of local variables for current method
   , nextLabel :: Int
-  , labelsMap :: M.Map Label Word16
+  , labelsMap :: M.Map Label Int
 }
 
 newtype GState = GState
@@ -57,14 +69,13 @@ type Description = String
 data GenError = EncodeError String
   | OutsideMethod Description
   | NestedMethodError MethodDirect MethodSignature
+  | MissingBlockForLabel Label
 
 instance showGenError :: Show GenError where
   show (EncodeError err) = "EncodeError " <> err
   show (OutsideMethod err) = "OutsideMethod " <> err
+  show (MissingBlockForLabel (Label i)) = "MissingBlockForLabel " <> (show i)
   show (NestedMethodError outer inner) = "NestedMethodError " <> (show inner) <> " inside " <> (show outer)
-
-instance showLabel :: Show Label where
-  show (Label n) = "Label " <> show n
 
 derive instance genericGState :: Generic GState _
 derive instance genericMethodState :: Generic MethodState _
@@ -170,15 +181,18 @@ addToPool c@(CNameType name sig) = do
   addItem c
 addToPool c = addItem c
 
-putInstruction :: forall m. MonadThrow GenError m => MonadState GState m => Instruction -> m Unit
-putInstruction instr = do
+putInstr :: forall m. MonadThrow GenError m => MonadState GState m => Instr -> m Unit
+putInstr instr = do
   (MethodState mthdState @ {code}) <- getCurrentMethod "putInstruction"
   ST.modify_ $ \(GState st) ->
     GState $ st { currentMethod = Just $ MethodState $ mthdState { code = A.snoc code instr } }
 
 -- | Generate one (zero-arguments) instruction
 i0 :: forall m. MonadThrow GenError m => MonadState GState m => Instruction -> m Unit
-i0 = putInstruction
+i0 i = putInstr (Instr i)
+
+jmpInstr :: forall m. MonadThrow GenError m => MonadState GState m => JumpOperation Label Label -> m Unit
+jmpInstr i = putInstr (JumpInstr i)
 
 -- | Generate one one-argument instruction
 i1 :: forall m. MonadThrow GenError m
@@ -211,7 +225,8 @@ newLabel = do
 newBlock :: forall m a. MonadThrow GenError m => MonadState GState m => Label -> m a -> m a
 newBlock label block = do
   (MethodState ms @ {code, labelsMap}) <- getCurrentMethod "newBlock"
-  let newLabelsMap = M.insert label (Word16 $ fromInt $ codeBytesLength code) labelsMap
+  codeInstructions <- traverse toInstruction1 code
+  let newLabelsMap = M.insert label (codeBytesLength codeInstructions) labelsMap
   ST.modify_ $ \(GState st) -> GState $ st { currentMethod = Just $ MethodState $ ms { labelsMap = newLabelsMap }}
   block
 
@@ -234,15 +249,20 @@ setMaxLocals n = do
   (MethodState mthdState) <- getCurrentMethod "setMaxLocals"
   ST.modify_ $ \(GState st) -> GState $ st { currentMethod = Just $ MethodState $ mthdState { localsSize = n } }
 
+defaultStackSize :: Int
+defaultStackSize = 256
+
+defaultMaxLocals :: Int
+defaultMaxLocals = 256
+
 -- | Start generating new method
 startMethod :: forall m. MonadThrow GenError m
                           => MonadState GState m
-                          => { stackSize :: Int, maxLocals :: Int }
-                          -> Array MethodAccessFlag
+                          => Array MethodAccessFlag
                           -> String
                           -> MethodSignature
                           -> m Unit
-startMethod {stackSize, maxLocals} flags methodName methodSignature = do
+startMethod flags methodName methodSignature = do
   _ <- addToPool (CString methodName)
   _ <- addSig methodSignature
   (GState { currentMethod }) <- ST.get
@@ -257,8 +277,8 @@ startMethod {stackSize, maxLocals} flags methodName methodSignature = do
         , methodAttributes
         }
   ST.modify_ $ \(GState st) -> GState $ st { currentMethod = Just $ defaultMethodState method }
-  _ <- setStackSize $ Word16 $ fromInt stackSize
-  void $ setMaxLocals $ Word16 $ fromInt maxLocals
+  _ <- setStackSize $ Word16 $ fromInt defaultStackSize
+  void $ setMaxLocals $ Word16 $ fromInt defaultMaxLocals
 
 -- | End of method generation
 endMethod :: forall m. MonadThrow GenError m => MonadState GState m => MonadThrow GenError m => m Unit
@@ -275,14 +295,53 @@ endMethod = do
 codeBytesLength :: (Array Instruction) -> Int
 codeBytesLength = A.length <<< encodeInstructions
 
+toInstruction1 :: forall m. MonadThrow GenError m => Instr -> m Instruction
+toInstruction1 ji = case ji of
+  (Instr i) -> pure i
+  (JumpInstr (IF cmp label)) -> (JUMP_OP <<< (IF cmp)) <$> (label16For label)
+  (JumpInstr (IF_ICMP cmp label)) -> (JUMP_OP <<< (IF_ICMP cmp)) <$> (label16For label)
+  (JumpInstr (IF_ACMP cmp label)) -> (JUMP_OP <<< (IF_ACMP cmp)) <$> (label16For label)
+  (JumpInstr (GOTO label)) -> (JUMP_OP <<< GOTO) <$> (label16For label)
+  (JumpInstr (JSR label)) -> (JUMP_OP <<< JSR) <$> (label16For label)
+  (JumpInstr (IFNULL label)) -> (JUMP_OP <<< IFNULL) <$> (label16For label)
+  (JumpInstr (IFNONNULL label)) -> (JUMP_OP <<< IFNONNULL) <$> (label16For label)
+  (JumpInstr (GOTO_W label)) -> (JUMP_OP <<< GOTO_W) <$> (label32For label)
+  (JumpInstr (JSR_W label)) -> (JUMP_OP <<< JSR_W) <$> (label32For label)
+  where
+    label16For :: Label -> m Word16
+    label16For label = pure $ Word16 $ fromInt 0
+    label32For label = pure $ Word32 $ fromInt 0
+
+toInstruction :: forall m. MonadThrow GenError m => M.Map Label Int -> Instr -> m Instruction
+toInstruction labelsMap ji = case ji of
+  (Instr i) -> pure i
+  (JumpInstr (IF cmp label)) -> (JUMP_OP <<< (IF cmp)) <$> (label16For label)
+  (JumpInstr (IF_ICMP cmp label)) -> (JUMP_OP <<< (IF_ICMP cmp)) <$> (label16For label)
+  (JumpInstr (IF_ACMP cmp label)) -> (JUMP_OP <<< (IF_ACMP cmp)) <$> (label16For label)
+  (JumpInstr (GOTO label)) -> (JUMP_OP <<< GOTO) <$> (label16For label)
+  (JumpInstr (JSR label)) -> (JUMP_OP <<< JSR) <$> (label16For label)
+  (JumpInstr (IFNULL label)) -> (JUMP_OP <<< IFNULL) <$> (label16For label)
+  (JumpInstr (IFNONNULL label)) -> (JUMP_OP <<< IFNONNULL) <$> (label16For label)
+  (JumpInstr (GOTO_W label)) -> (JUMP_OP <<< GOTO_W) <$> (label32For label)
+  (JumpInstr (JSR_W label)) -> (JUMP_OP <<< JSR_W) <$> (label32For label)
+  where
+    label16For :: Label -> m Word16
+    label16For label = (Word16 <<< fromInt) <$> (labelFor label)
+    label32For label = (Word32 <<< fromInt) <$> (labelFor label)
+    labelFor label =
+      case M.lookup label labelsMap of
+        Nothing -> throwError $ MissingBlockForLabel label
+        (Just i) -> pure i
+
 genCode :: forall m. MonadThrow GenError m => MonadState GState m => m Code
 genCode = do
-  (MethodState {stackSize, localsSize, code}) <- getCurrentMethod "genCode"
+  (MethodState {stackSize, localsSize, code, labelsMap}) <- getCurrentMethod "genCode"
+  codeInstructions <- traverse (toInstruction labelsMap) code
   pure $ Code
       { codeStackSize : stackSize
       , codeMaxLocals : localsSize
-      , codeLength : Word32 $ fromInt $ codeBytesLength code
-      , codeInstructions : code
+      , codeLength : Word32 $ fromInt $ codeBytesLength codeInstructions
+      , codeInstructions : codeInstructions
       , codeExceptionsN : Word16 $ fromInt 0
       , codeExceptions : []
       , codeAttrsN : Word16 $ fromInt 0
@@ -291,16 +350,15 @@ genCode = do
 -- | Generate new method
 newMethod :: forall m. MonadThrow GenError m
           => MonadState GState m
-          => { stackSize :: Int, maxLocals :: Int }
-          -> Array MethodAccessFlag   -- ^ Access flags for method (public, static etc)
+          => Array MethodAccessFlag   -- ^ Access flags for method (public, static etc)
           -> String                   -- ^ Method name
           -> Array JVMType          -- ^ Signatures of method arguments
           -> ReturnSignature          -- ^ Method return signature
           -> m Unit                   -- ^ Generator for method code
           -> m MethodNameType
-newMethod opts flags ntName args ret gen = do
+newMethod flags ntName args ret gen = do
   let ntSignature = MethodSignature args ret
-  startMethod opts flags ntName ntSignature
+  startMethod flags ntName ntSignature
   gen
   endMethod
   pure $ MethodNameType { ntName, ntSignature }

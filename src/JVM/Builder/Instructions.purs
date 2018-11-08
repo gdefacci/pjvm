@@ -5,10 +5,9 @@ import Prelude
 import Control.Monad.Error.Class (class MonadThrow)
 import Control.Monad.State (class MonadState)
 import Data.Binary.Types (Word16, Word8)
-
-import JVM.Builder.Monad (GState, GenError, i0, i1, i8)
+import JVM.Builder.Monad (GState, GenError, Label, i0, i1, i8, jmpInstr)
 import JVM.ConstantPool (Constant(..), ConstantDirect)
-import JVM.Instruction (ArrayType, BitOperation(..), CMP, IL(..), ILFD(..), ILFDA(..), IMM, Instruction(..), JT(..), JTA(..), NumOperation(..), StackOperation(..), T32(..), atype2byte)
+import JVM.Instruction (ArrayType, BitOperation(..), CMP, IL(..), ILFD(..), ILFDA(..), IMM, Instruction(..), JT(..), JTA(..), JumpOperation(..), NumOperation(..), StackOperation(..), T32(..), atype2byte)
 import JVM.Members (FieldNameType, MethodNameType)
 
 nop :: forall m. MonadThrow GenError m => MonadState GState m => m Unit
@@ -270,6 +269,25 @@ fcmp :: forall m. MonadThrow GenError m => MonadState GState m => CMP -> m Unit
 fcmp cmp = i0 $ FCMP cmp
 dcmp :: forall m. MonadThrow GenError m => MonadState GState m => CMP -> m Unit
 dcmp cmp = i0 $ DCMP cmp
+
+if_ :: forall m. MonadThrow GenError m => MonadState GState m => CMP -> Label -> m Unit
+if_ cmp w16 = jmpInstr $ IF cmp w16
+if_icmp :: forall m. MonadThrow GenError m => MonadState GState m => CMP -> Label -> m Unit
+if_icmp cmp w16 = jmpInstr $ IF_ICMP cmp w16
+if_acmp :: forall m. MonadThrow GenError m => MonadState GState m => CMP -> Label -> m Unit
+if_acmp cmp w16 = jmpInstr $ IF_ACMP cmp w16
+goto :: forall m. MonadThrow GenError m => MonadState GState m => Label -> m Unit
+goto w16 = jmpInstr $ GOTO w16
+jsr :: forall m. MonadThrow GenError m => MonadState GState m => Label -> m Unit
+jsr w16 = jmpInstr $ JSR w16
+ifnull :: forall m. MonadThrow GenError m => MonadState GState m => Label -> m Unit
+ifnull w16 = jmpInstr $ IFNULL w16
+ifnonnull :: forall m. MonadThrow GenError m => MonadState GState m => Label -> m Unit
+ifnonnull w16 = jmpInstr $ IFNONNULL w16
+goto_w :: forall m. MonadThrow GenError m => MonadState GState m => Label -> m Unit
+goto_w w32 = jmpInstr $ GOTO_W w32
+jsr_w :: forall m. MonadThrow GenError m => MonadState GState m => Label -> m Unit
+jsr_w w32 = jmpInstr $ JSR_W w32
 
 -- | Wide instruction
 -- wide :: forall m. MonadThrow GenError m => MonadState GState m => (Word8 -> Instruction) -> ConstantDirect -> m Unit

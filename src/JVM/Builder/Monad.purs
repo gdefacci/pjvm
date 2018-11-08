@@ -16,7 +16,7 @@ import Data.FoldableWithIndex (findWithIndex)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Map as M
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe(..), maybe)
 import Data.Set as S
 import Data.Tuple (Tuple(..), snd)
 import Data.UInt (fromInt, toInt)
@@ -54,11 +54,14 @@ newtype Generate e m a = Generate ( ExceptT e (StateT GState m) a  )
 
 type Description = String
 
-data GenError = EncodeError String | OutsideMethod Description
+data GenError = EncodeError String
+  | OutsideMethod Description
+  | NestedMethodError MethodDirect MethodSignature
 
 instance showGenError :: Show GenError where
   show (EncodeError err) = "EncodeError " <> err
   show (OutsideMethod err) = "OutsideMethod " <> err
+  show (NestedMethodError outer inner) = "NestedMethodError " <> (show inner) <> " inside " <> (show outer)
 
 instance showLabel :: Show Label where
   show (Label n) = "Label " <> show n
@@ -242,6 +245,8 @@ startMethod :: forall m. MonadThrow GenError m
 startMethod {stackSize, maxLocals} flags methodName methodSignature = do
   _ <- addToPool (CString methodName)
   _ <- addSig methodSignature
+  (GState { currentMethod }) <- ST.get
+  maybe (pure unit) (\(MethodState { method }) -> throwError $ NestedMethodError method methodSignature) currentMethod
   let methodAttributesCount = Word16 $ fromInt 0
       methodAttributes = AttributesDirect []
       method = MethodDirect $ Method

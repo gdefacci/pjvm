@@ -46,6 +46,16 @@ data StackOperation = Pop | Pop2 | Dup | Dup_x1 | Dup_x2 | Dup2 | Dup2_x1 | Dup2
 data NumOperation = Add | Sub | Mul | Div | Rem | Neg
 data BitOperation = Shl | Shr | Ushr | And | Or | Xor
 
+data JumpOperation w16 w32 = IF CMP w16
+  | IF_ICMP CMP w16
+  | IF_ACMP CMP w16
+  | GOTO w16
+  | JSR w16
+  | IFNULL w16
+  | IFNONNULL w16
+  | GOTO_W w32
+  | JSR_W w32
+
 data Instruction =
     NOP
   | ACONST_NULL
@@ -75,11 +85,12 @@ data Instruction =
   | LCMP
   | FCMP CMP
   | DCMP CMP
-  | IF CMP Word16
-  | IF_ICMP CMP Word16
-  | IF_ACMP CMP Word16
-  | GOTO Word16
-  | JSR Word16
+  | JUMP_OP (JumpOperation Word16 Word32)
+--  | IF CMP Word16
+--  | IF_ICMP CMP Word16
+--  | IF_ACMP CMP Word16
+--  | GOTO Word16
+--  | JSR Word16
   | RET
   | TABLESWITCH Word8 Word32 Word32 Word32 (Array Word32)
   | LOOKUPSWITCH Word8 Word32 Word32 (Array (Tuple Word32 Word32))
@@ -104,10 +115,10 @@ data Instruction =
   | MONITOREXIT
   | WIDE Word8 Instruction
   | MULTINANEWARRAY Word16 Word8
-  | IFNULL Word16
-  | IFNONNULL Word16
-  | GOTO_W Word32
-  | JSR_W Word32
+--  | IFNULL Word16
+--  | IFNONNULL Word16
+--  | GOTO_W Word32
+--  | JSR_W Word32
 
 -- | JVM array type (primitive types)
 data ArrayType =
@@ -307,13 +318,13 @@ instance binaryInstruction :: Binary Instruction where
   put (DCMP C_LT)     = putByte 151
   put (DCMP C_GT)     = putByte 152
   put (DCMP c)        = putFail $ \_ -> "No such instruction: DCMP " <> show c
-  put (IF c x)        = putByte (153 + (defaultFromEnum c)) <> put x
-  put (IF_ACMP C_EQ x) = put1 165 x
-  put (IF_ACMP C_NE x) = put1 166 x
-  put (IF_ACMP c _)   = putFail $ \_ -> "No such instruction: IF_ACMP " <> show c
-  put (IF_ICMP c x)   = putByte (159 + (defaultFromEnum c)) <> put x
-  put (GOTO x)        = put1 167 x
-  put (JSR x)         = put1 168 x
+  put (JUMP_OP (IF c x)         ) = putByte (153 + (defaultFromEnum c)) <> put x
+  put (JUMP_OP (IF_ACMP C_EQ x) ) = put1 165 x
+  put (JUMP_OP (IF_ACMP C_NE x) ) = put1 166 x
+  put (JUMP_OP (IF_ACMP c _)    ) = putFail $ \_ -> "No such instruction: IF_ACMP " <> show c
+  put (JUMP_OP (IF_ICMP c x)    ) = putByte (159 + (defaultFromEnum c)) <> put x
+  put (JUMP_OP (GOTO x)         ) = put1 167 x
+  put (JUMP_OP (JSR x)          ) = put1 168 x
   put  RET            = putByte 169
   put (TABLESWITCH _ def low high offs) =
     put (Word8 $ fromInt 170) <>
@@ -350,10 +361,10 @@ instance binaryInstruction :: Binary Instruction where
   put  MONITOREXIT    = putByte 195
   put (WIDE x inst)   = put2 196 x inst
   put (MULTINANEWARRAY x y) = put2 197 x y
-  put (IFNULL x)      = put1 198 x
-  put (IFNONNULL x)   = put1 199 x
-  put (GOTO_W x)      = put1 200 x
-  put (JSR_W x)       = put1 201 x
+  put (JUMP_OP (IFNULL x)   )   = put1 198 x
+  put (JUMP_OP (IFNONNULL x))   = put1 199 x
+  put (JUMP_OP (GOTO_W x)   )   = put1 200 x
+  put (JUMP_OP (JSR_W x)    )   = put1 201 x
 
   get = do
     (Word8 ch) <- get
@@ -485,10 +496,10 @@ instance binaryInstruction :: Binary Instruction where
       150 -> pure $ FCMP C_GT
       151 -> pure $ DCMP C_LT
       152 -> pure $ DCMP C_GT
-      165 -> IF_ACMP C_EQ <$> get
-      166 -> IF_ACMP C_NE <$> get
-      167 -> GOTO <$> get
-      168 -> JSR <$> get
+      165 -> (JUMP_OP <<< (IF_ACMP C_EQ)) <$> get
+      166 -> (JUMP_OP <<< (IF_ACMP C_NE)) <$> get
+      167 -> (JUMP_OP <<< (GOTO)) <$> get
+      168 -> (JUMP_OP <<< (JSR )) <$> get
       169 -> pure RET
       170 -> do
              offset <- getOffset
@@ -534,10 +545,10 @@ instance binaryInstruction :: Binary Instruction where
       195 -> pure MONITOREXIT
       196 -> WIDE <$> get <*> get
       197 -> MULTINANEWARRAY <$> get <*> get
-      198 -> IFNULL <$> get
-      199 -> IFNONNULL <$> get
-      200 -> GOTO_W <$> get
-      201 -> JSR_W <$> get
+      198 -> (JUMP_OP <<< IFNULL   )  <$> get
+      199 -> (JUMP_OP <<< IFNONNULL)  <$> get
+      200 -> (JUMP_OP <<< GOTO_W   )  <$> get
+      201 -> (JUMP_OP <<< JSR_W    )  <$> get
       _ | inRange 59 62 c  -> imm 59 (STORE_ ILFDA_I) c
         | inRange 63 66 c  -> imm 63 (STORE_ ILFDA_L) c
         | inRange 67 70 c  -> imm 67 (STORE_ ILFDA_F) c
@@ -548,8 +559,8 @@ instance binaryInstruction :: Binary Instruction where
         | inRange 34 37 c  -> imm 34 (LOAD_ ILFDA_F)  c
         | inRange 38 41 c  -> imm 38 (LOAD_ ILFDA_D)  c
         | inRange 42 45 c  -> imm 42 (LOAD_ ILFDA_A)  c
-        | inRange 15 158 c -> IF <$> (decodeEnum "CMP" $ c- 153) <*> get
-        | inRange 15 164 c -> IF_ICMP <$> (decodeEnum "CMP" $ c- 159) <*> get
+        | inRange 15 158 c -> (\a -> \b -> JUMP_OP $ IF a b) <$> (decodeEnum "CMP" $ c- 153) <*> get
+        | inRange 15 164 c -> (\a -> \b -> JUMP_OP $ IF_ICMP a b) <$> (decodeEnum "CMP" $ c- 159) <*> get
         | otherwise -> fail $ \offset -> GenericParserError { offset, message: "Unknown instruction byte code: " <> show c}
 
 -- | Calculate padding for current bytecode offset (cf. TABLESWITCH and LOOKUPSWITCH)
@@ -714,6 +725,13 @@ instance showBitOperation :: Show BitOperation where
 instance enumBitOperation :: Enum BitOperation where
   succ = genericSucc
   pred = genericPred
+
+derive instance eqJumpOperation :: (Eq a, Eq b) => Eq (JumpOperation a b)
+derive instance ordJumpOperation :: (Ord a, Ord b) => Ord (JumpOperation a b)
+derive instance genericJumpOperation :: Generic (JumpOperation a b) _
+
+instance showJumpOperation :: (Show a, Show b) => Show (JumpOperation a b) where
+  show = genericShow
 
 derive instance eqInstruction :: Eq Instruction
 

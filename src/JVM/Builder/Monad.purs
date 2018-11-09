@@ -225,7 +225,7 @@ newLabel = do
 newBlock :: forall m a. MonadThrow GenError m => MonadState GState m => Label -> m a -> m a
 newBlock label block = do
   (MethodState ms @ {code, labelsMap}) <- getCurrentMethod "newBlock"
-  codeInstructions <- traverse toInstruction1 code
+  codeInstructions <- traverse (toInstruction $ const $ pure 0)  code
   let newLabelsMap = M.insert label (codeBytesLength codeInstructions) labelsMap
   ST.modify_ $ \(GState st) -> GState $ st { currentMethod = Just $ MethodState $ ms { labelsMap = newLabelsMap }}
   block
@@ -295,25 +295,16 @@ endMethod = do
 codeBytesLength :: (Array Instruction) -> Int
 codeBytesLength = A.length <<< encodeInstructions
 
-toInstruction1 :: forall m. MonadThrow GenError m => Instr -> m Instruction
-toInstruction1 ji = case ji of
-  (Instr i) -> pure i
-  (JumpInstr (IF cmp label)) -> (JUMP_OP <<< (IF cmp)) <$> (label16For label)
-  (JumpInstr (IF_ICMP cmp label)) -> (JUMP_OP <<< (IF_ICMP cmp)) <$> (label16For label)
-  (JumpInstr (IF_ACMP cmp label)) -> (JUMP_OP <<< (IF_ACMP cmp)) <$> (label16For label)
-  (JumpInstr (GOTO label)) -> (JUMP_OP <<< GOTO) <$> (label16For label)
-  (JumpInstr (JSR label)) -> (JUMP_OP <<< JSR) <$> (label16For label)
-  (JumpInstr (IFNULL label)) -> (JUMP_OP <<< IFNULL) <$> (label16For label)
-  (JumpInstr (IFNONNULL label)) -> (JUMP_OP <<< IFNONNULL) <$> (label16For label)
-  (JumpInstr (GOTO_W label)) -> (JUMP_OP <<< GOTO_W) <$> (label32For label)
-  (JumpInstr (JSR_W label)) -> (JUMP_OP <<< JSR_W) <$> (label32For label)
-  where
-    label16For :: Label -> m Word16
-    label16For label = pure $ Word16 $ fromInt 0
-    label32For label = pure $ Word32 $ fromInt 0
+type LabelLookup m a = MonadThrow GenError m => Label -> m a
 
-toInstruction :: forall m. MonadThrow GenError m => M.Map Label Int -> Instr -> m Instruction
-toInstruction labelsMap ji = case ji of
+lookupLabelsMap :: forall m a. M.Map Label a -> LabelLookup m a
+lookupLabelsMap labelsMap label =
+      case M.lookup label labelsMap of
+        Nothing -> throwError $ MissingBlockForLabel label
+        (Just i) -> pure i
+
+toInstruction :: forall m. MonadThrow GenError m => LabelLookup m Int -> Instr -> m Instruction
+toInstruction labelFor ji = case ji of
   (Instr i) -> pure i
   (JumpInstr (IF cmp label)) -> (JUMP_OP <<< (IF cmp)) <$> (label16For label)
   (JumpInstr (IF_ICMP cmp label)) -> (JUMP_OP <<< (IF_ICMP cmp)) <$> (label16For label)
@@ -328,15 +319,11 @@ toInstruction labelsMap ji = case ji of
     label16For :: Label -> m Word16
     label16For label = (Word16 <<< fromInt) <$> (labelFor label)
     label32For label = (Word32 <<< fromInt) <$> (labelFor label)
-    labelFor label =
-      case M.lookup label labelsMap of
-        Nothing -> throwError $ MissingBlockForLabel label
-        (Just i) -> pure i
 
 genCode :: forall m. MonadThrow GenError m => MonadState GState m => m Code
 genCode = do
   (MethodState {stackSize, localsSize, code, labelsMap}) <- getCurrentMethod "genCode"
-  codeInstructions <- traverse (toInstruction labelsMap) code
+  codeInstructions <- traverse (toInstruction $ lookupLabelsMap labelsMap) code
   pure $ Code
       { codeStackSize : stackSize
       , codeMaxLocals : localsSize
@@ -352,7 +339,7 @@ newMethod :: forall m. MonadThrow GenError m
           => MonadState GState m
           => Array MethodAccessFlag   -- ^ Access flags for method (public, static etc)
           -> String                   -- ^ Method name
-          -> Array JVMType          -- ^ Signatures of method arguments
+          -> Array JVMType            -- ^ Signatures of method arguments
           -> ReturnSignature          -- ^ Method return signature
           -> m Unit                   -- ^ Generator for method code
           -> m MethodNameType
